@@ -18,6 +18,7 @@
     alertFilter: "todas",
     perfHorizon: "d7",
     radar: { coins: null, ts: 0, loading: false, error: null, filter: "todas", tableFilter: "top25", tableSort: { key: "score", dir: "desc" } },
+    news: { items: null, ts: 0, loading: false, source: null, error: null },
     theme: "dark",
     fav: ["BTC", "ETH", "SOL"],
     prefs: { rsi: true, ema: true, vol: true, signal: true },
@@ -334,6 +335,7 @@
     return `
       <div class="page-head"><h1>Dashboard</h1><p>${cap(fecha)} · visión general del mercado y señales del motor NEXUS.</p></div>
 
+      ${hasSignals ? todayPickCard() : ""}
       ${hasSignals ? briefingCard() : ""}
 
       <div class="dash-top">
@@ -447,6 +449,9 @@
      PANTALLA · OPORTUNIDADES (capa de derivación; no toca el motor)
      ===================================================================== */
   const OPP = window.NexusOpportunities;
+  const CTX = window.NexusContext;
+  const NEWS = window.NexusNews;
+  const CONV = window.NexusConvictions;
   const OPP_BADGE = { segura: ["signal-buy", "🟢 Segura"], moderada: ["signal-neutral", "🟡 Moderada"], riesgosa: ["signal-sell", "🔴 Riesgosa"] };
   const oppBadge = (lv) => { const m = OPP_BADGE[lv] || OPP_BADGE.riesgosa; return `<span class="badge ${m[0]}">${m[1]}</span>`; };
   const ACTION = { fuerte: ["signal-buy", "Compra fuerte"], moderada: ["signal-buy", "Compra moderada"], especulativa: ["signal-neutral", "Compra especulativa"], evitar: ["signal-sell", "Evitar"] };
@@ -694,6 +699,164 @@
   }
 
   /* =====================================================================
+     CONVICCIÓN MÁXIMA + CONTEXTO DEL MERCADO (capa de interpretación)
+     Responde "¿qué compraría NEXUS hoy y por qué?" sin obligar al usuario
+     a interpretar indicadores. Reutiliza el motor de oportunidades; no lo toca.
+     ===================================================================== */
+  const MEDAL = ["🥇", "🥈", "🥉"];
+
+  // Top N convicciones = mejor atractivo del motor (solo análisis completo).
+  function topConvictions(n) {
+    if (!OPP || !DATA) return [];
+    return OPP.rankByRating(DATA.coins.filter(hasFullAnalysis)).slice(0, n || 3);
+  }
+
+  // Explicaciones técnicas en lenguaje natural (RSI, Momentum, EMA, MACD).
+  function techExplain(c) {
+    const out = [];
+    if (c.rsi != null) {
+      const v = Math.round(c.rsi);
+      if (c.rsi > 70) out.push({ t: `RSI ${v}: sobrecompra, posible pausa`, p: "neu" });
+      else if (c.rsi < 30) out.push({ t: `RSI ${v}: sobreventa, posible rebote`, p: "neu" });
+      else if (c.rsi >= 45 && c.rsi <= 65) out.push({ t: `RSI ${v}: impulso saludable`, p: "pos" });
+      else out.push({ t: `RSI ${v}: sin extremos`, p: "neu" });
+    }
+    const m7 = c.change7d || 0;
+    if (m7 > 3) out.push({ t: `Momentum +${m7.toFixed(1)}% en 7d`, p: "pos" });
+    else if (m7 < -3) out.push({ t: `Momentum ${m7.toFixed(1)}% en 7d`, p: "neg" });
+    else out.push({ t: `Momentum plano (${m7.toFixed(1)}% 7d)`, p: "neu" });
+    if (c.ema50 != null && c.ema200 != null) {
+      if (c.price > c.ema50 && c.ema50 > c.ema200) out.push({ t: "EMAs alineadas al alza", p: "pos" });
+      else if (c.price < c.ema50 && c.ema50 < c.ema200) out.push({ t: "EMAs alineadas a la baja", p: "neg" });
+      else out.push({ t: "EMAs mixtas, sin alineación clara", p: "neu" });
+    }
+    if (c.macd) {
+      if (c.macd.hist > 0) out.push({ t: "MACD al alza (histograma positivo)", p: "pos" });
+      else if (c.macd.hist < 0) out.push({ t: "MACD a la baja (histograma negativo)", p: "neg" });
+      else out.push({ t: "MACD plano", p: "neu" });
+    }
+    return out;
+  }
+
+  // Texto natural por oportunidad.
+  function convictionText(c, pos) {
+    const conv = OPP.conviction(c).toLowerCase();
+    const tr = c.trend === "alcista" ? "estructura alcista" : c.trend === "bajista" ? "estructura bajista" : "estructura lateral";
+    const lead = pos === 0 ? "Actualmente es la mejor oportunidad detectada por NEXUS"
+      : pos === 1 ? "Es la segunda mejor oportunidad" : "Es la tercera mejor oportunidad";
+    const why = [];
+    if (c.score > 0) why.push("score positivo");
+    if (c.confidence >= 60) why.push("confianza alta del motor");
+    if ((c.change7d || 0) > 0) why.push("momentum favorable");
+    if (c.macd && c.macd.hist > 0) why.push("MACD al alza");
+    const reason = why.length ? why.join(", ") : "una combinación equilibrada de factores";
+    return `${lead} debido a ${reason}, sobre una ${tr}. Convicción ${conv} y riesgo ${c.risk || "medio"}.`;
+  }
+
+  // "¿Por qué está #N?" — explicación sencilla y comparativa.
+  function whyRank(c, i, list) {
+    const r = OPP.rating(c).toFixed(1);
+    if (i === 0) return `Lidera con el mayor puntaje de atractivo (${r}/10): score, confianza y confirmaciones técnicas por encima del resto.`;
+    const prev = list[i - 1], diff = (OPP.rating(prev) - OPP.rating(c)).toFixed(1);
+    const reason = c.risk === "alto" ? "su mayor riesgo"
+      : (c.confidence || 0) < (prev.confidence || 0) ? "una confianza algo menor"
+      : "un puntaje técnico ligeramente inferior";
+    return `Queda en el puesto ${i + 1} (rating ${r}/10) por ${reason}, a ${diff} punto(s) del anterior.`;
+  }
+
+  function marketContextCard() {
+    if (!CTX || !DATA) return "";
+    const x = CTX.build(DATA.market, DATA.coins);
+    const dirCls = x.trend.dir === "alcista" ? "pos" : x.trend.dir === "bajista" ? "neg" : "muted";
+    return `<div class="card ctx-card" style="margin-bottom:16px">
+      <div class="section-head"><h2>📰 Contexto del Mercado</h2><span class="faint" style="font-size:12px">interpretación · no asesoría</span></div>
+      <div class="grid cols-4">
+        <div class="metric"><div class="m-label">Fear &amp; Greed</div><div class="m-val">${x.fearGreed.value} <span class="faint" style="font-size:12px">${x.fearGreed.label}</span></div></div>
+        <div class="metric"><div class="m-label">Dominancia BTC</div><div class="m-val">${x.dominance != null ? x.dominance + "%" : "—"}</div></div>
+        <div class="metric"><div class="m-label">Tendencia general</div><div class="m-val ${dirCls}" style="font-size:15px">${x.trend.label}</div></div>
+        <div class="metric"><div class="m-label">Sentimiento</div><div class="m-val" style="font-size:15px">${cap(x.sentiment.mood)}</div></div>
+      </div>
+      <p class="muted" style="margin:14px 0 0;font-size:13px;line-height:1.55">${x.summary}</p>
+    </div>`;
+  }
+
+  // Tarjeta compacta para el Dashboard ("30 segundos").
+  function todayPickCard() {
+    if (!OPP) return "";
+    const top = topConvictions(3);
+    if (!top.length) return "";
+    const line = (c, i) => {
+      const prob = OPP.probability(c), conv = OPP.conviction(c);
+      const sub = c.signal === "compra" ? "Señal de compra" : c.trend === "alcista" ? "Estructura alcista" : "Oportunidad detectada";
+      return `<div class="pick-row" data-coin="${c.symbol}">
+        <span class="pick-medal">${MEDAL[i]}</span>
+        <div class="pick-body">
+          <div class="pick-top"><strong>${c.symbol}</strong> <span class="faint">${c.name}</span> <span class="pick-conv">${conv}</span></div>
+          <div class="pick-sub faint">${sub} · prob. ${prob}% · riesgo ${c.risk || "medio"}</div>
+        </div>
+        <span class="pick-score mono ${c.score >= 0 ? "pos" : "neg"}">${fmtScore(c.score)}</span>
+      </div>`;
+    };
+    return `<div class="card pick-card">
+      <div class="briefing-head"><span class="briefing-kicker">NEXUS · Decisión</span><h2>Si hoy tuviera que elegir</h2></div>
+      <div class="pick-list">${top.map(line).join("")}</div>
+      <div class="pick-foot"><span class="link" data-view-link="conviction">Ver Convicción Máxima →</span></div>
+    </div>`;
+  }
+
+  function renderConviction() {
+    const head = `<div class="page-head"><h1>🎯 Convicción Máxima</h1><p>Las 3 mejores oportunidades del momento, explicadas en lenguaje simple: qué compraría NEXUS hoy y por qué. <span class="faint">No es asesoría financiera.</span></p></div>`;
+    if (!OPP) return head + `<div class="card"><p class="muted" style="margin:0">Motor de oportunidades no disponible.</p></div>`;
+    const top = topConvictions(3);
+    if (!top.length) return head + marketContextCard() + `<div class="card"><p class="muted" style="margin:0">Sin oportunidades con análisis completo en este momento.</p></div>`;
+
+    const news = state.news.items || (DATA && DATA.news) || [];
+    const field = (l, v) => `<div class="cv-field"><span>${l}</span><strong>${v}</strong></div>`;
+    const cards = top.map((c, i) => {
+      const pot = OPP.potential(c), prob = OPP.probability(c), conv = OPP.conviction(c);
+      const tech = techExplain(c);
+      const impact = CTX ? CTX.opportunityImpact(c, news) : { label: "Sin noticias", dir: "neutral", related: [] };
+      return `<div class="card cv-card" data-coin="${c.symbol}">
+        <div class="cv-head">
+          <span class="cv-medal">${MEDAL[i]}</span>${coinCell(c)}
+          <span class="cv-conv conv-${conv.replace(/\s/g, "").toLowerCase()}">Convicción: ${conv}</span>
+        </div>
+        <div class="cv-grid">
+          ${field("Precio", money(c.price))}
+          ${field("Puntaje", `<span class="${c.score >= 0 ? "pos" : "neg"}">${fmtScore(c.score)}</span>`)}
+          ${field("Riesgo", riskBadge(c.risk))}
+          ${field("Prob. alcista", prob + "%")}
+          ${field("Potencial 7d", sPct(pot.d7.exp))}
+          ${field("Potencial 30d", sPct(pot.d30.exp))}
+        </div>
+        <div class="cv-tech">${tech.map((t) => `<span class="ind-chip cv-${t.p}">${t.t}</span>`).join("")}</div>
+        <p class="cv-text">${convictionText(c, i)}</p>
+        <div class="cv-news">
+          <span class="cv-news-label">Impacto de noticias:</span> <span class="badge sent-${impact.dir}">${impact.label}</span>
+          ${impact.related.length ? `<ul class="cv-news-list">${impact.related.map((n) => `<li><a href="${n.link}" target="_blank" rel="noopener" data-stop>${n.title}</a> <span class="faint">· ${n.source}</span></li>`).join("")}</ul>` : ` <span class="faint" style="font-size:12px">sin noticias asociadas</span>`}
+        </div>
+      </div>`;
+    }).join("");
+
+    const whyCard = `<div class="card"><div class="section-head"><h2>¿Por qué este orden?</h2></div>
+      ${top.map((c, i) => `<p class="cv-why"><strong>${MEDAL[i]} ${c.symbol} — ¿por qué está #${i + 1}?</strong><br><span class="faint">${whyRank(c, i, top)}</span></p>`).join("")}</div>`;
+
+    return head + marketContextCard() + `<div class="cv-list">${cards}</div>` + whyCard;
+  }
+
+  function ensureNews() {
+    const s = state.news;
+    if (s.loading) return;
+    if (s.items && Date.now() - s.ts < 30 * 60 * 1000) return;
+    if (!NEWS) return;
+    s.loading = true; s.error = null;
+    NEWS.load(false).then((res) => {
+      state.news.items = res.news; state.news.ts = Date.now(); state.news.source = res.source; state.news.error = res.error || null; state.news.loading = false;
+      if (state.view === "news") rerender();
+    }).catch((e) => { state.news.loading = false; state.news.error = e.message; if (state.view === "news") rerender(); });
+  }
+
+  /* =====================================================================
      PANTALLA · ANÁLISIS IA
      ===================================================================== */
   function renderAnalysis() {
@@ -851,21 +1014,30 @@
     return `Impacto <span class="impact-dots">${[0, 1, 2].map((i) => `<i class="${i < n ? "on" : ""}"></i>`).join("")}</span>`;
   }
   function renderNews() {
-    const count = (s) => DATA.news.filter((n) => n.sentiment === s).length;
-    const card = (n) => { const c = n.sym ? coinBy(n.sym) : null; return `<div class="card news-card" ${c ? `data-coin="${c.symbol}"` : ""}>
-      <div class="news-top"><span class="news-source">${n.source}</span><span class="faint" style="font-size:12px">${n.time}</span></div>
-      <div class="news-title">${n.title}</div>
+    ensureNews();
+    const items = state.news.items || (DATA && DATA.news) || [];
+    const src = state.news.source;
+    const srcTxt = src === "live" ? "Titulares reales en vivo (RSS de medios cripto)."
+      : src === "cache" ? "Titulares reales (en caché)."
+      : src === "fallback" ? "No se pudieron cargar titulares en vivo; mostrando ejemplos." : "Cargando titulares reales…";
+    const count = (s) => items.filter((n) => n.sentiment === s).length;
+    const card = (n) => { const c = n.sym ? (DATA.coins.find((x) => x.symbol === n.sym)) : null; return `<div class="card news-card">
+      <div class="news-top"><span class="news-source">${n.source}</span><span class="faint" style="font-size:12px">${n.time || ""}</span></div>
+      <a class="news-title" href="${n.link || "#"}" target="_blank" rel="noopener">${n.title}</a>
       <div class="news-foot">${sentBadge(n.sentiment)}<span class="impact">${impactDots(n.impact)}</span></div>
-      ${c ? `<div style="margin-top:4px">${chip(coinLogo(c, 18) + " " + c.symbol)}</div>` : ""}
+      <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        ${c ? `<span class="chip" data-coin="${c.symbol}" style="cursor:pointer">${coinLogo(c, 18)} ${c.symbol}</span>` : ""}
+        ${n.estimated ? `<span class="faint" style="font-size:11px">sentimiento/impacto estimados</span>` : ""}
+      </div>
     </div>`; };
     return `
-      <div class="page-head"><h1>Noticias</h1><p>Titulares con clasificación de sentimiento e impacto estimado sobre el mercado.</p></div>
+      <div class="page-head"><h1>Noticias</h1><p>${srcTxt} Sentimiento e impacto son estimaciones automáticas (sin ML).</p></div>
       <div class="filter-row">
-        <span class="chip"><span class="pip" style="background:var(--green)"></span> ${count("positivo")} positivas</span>
+        <span class="chip"><span class="pip" style="background:var(--green)"></span> ${count("positivo")} alcistas</span>
         <span class="chip"><span class="pip" style="background:var(--text-faint)"></span> ${count("neutral")} neutrales</span>
-        <span class="chip"><span class="pip" style="background:var(--red)"></span> ${count("negativo")} negativas</span>
+        <span class="chip"><span class="pip" style="background:var(--red)"></span> ${count("negativo")} bajistas</span>
       </div>
-      <div class="news-grid">${DATA.news.map(card).join("")}</div>`;
+      ${items.length ? `<div class="news-grid">${items.map(card).join("")}</div>` : `<div class="card"><p class="muted" style="margin:0">${state.news.loading ? "Cargando titulares…" : "Sin noticias disponibles."}</p></div>`}`;
   }
   const chip = (inner) => `<span class="chip">${inner}</span>`;
 
@@ -1152,7 +1324,7 @@
      ROUTER + EVENTOS
      ===================================================================== */
   const VIEWS = {
-    dashboard: renderDashboard, market: renderMarket, watchlist: renderWatchlist, opportunities: renderOpportunities,
+    dashboard: renderDashboard, conviction: renderConviction, market: renderMarket, watchlist: renderWatchlist, opportunities: renderOpportunities,
     radar: renderRadar, analysis: renderAnalysis, profile: () => renderProfile(state.coin), alerts: renderAlerts, news: renderNews,
     performance: renderPerformance, system: renderSystem, settings: renderSettings,
   };
@@ -1216,7 +1388,8 @@
       downloadJSON(window.NexusHistory.exportJSON(), "nexus-historial.json");
     } else if (a === "backup") {
       let settings = null; try { settings = JSON.parse(localStorage.getItem("nexus.settings") || "null"); } catch (e) {}
-      downloadJSON(JSON.stringify({ v: 1, exportedAt: Date.now(), history: window.NexusHistory.getAll(), settings }, null, 2), "nexus-respaldo.json");
+      const convictions = (CONV && CONV.getAll()) || [];
+      downloadJSON(JSON.stringify({ v: 1, exportedAt: Date.now(), history: window.NexusHistory.getAll(), convictions, settings }, null, 2), "nexus-respaldo.json");
     } else if (a === "hist-clear") {
       if (window.confirm("¿Borrar todo el historial de señales? Esta acción no se puede deshacer.")) {
         window.NexusHistory.clear(); rerender();
@@ -1254,6 +1427,7 @@
     if (act && !changeDriven) { handleAction(act); return; }
     const recEl = e.target.closest("[data-record]");
     if (recEl) { openRecordModal(recEl.dataset.record); return; }
+    if (e.target.closest("a[href]")) return; // enlaces reales (noticias): que los maneje el navegador
     const coinEl = e.target.closest("[data-coin]");
     if (coinEl) { setView("profile", coinEl.dataset.coin); }
   }
@@ -1288,6 +1462,7 @@
     window.NEXUS_DATA = DATA; // expone los datos vigentes (reales o fallback)
     updateAlertBadge(); // contador según tipos/umbrales configurados
     refreshNotifs();    // contador de notificaciones no leídas
+    try { if (CONV && OPP) CONV.record(topConvictions(3), { conviction: OPP.conviction, rating: OPP.rating }); } catch (e) {}
     $("#lastUpdated").textContent = "Actualizado " + new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
     setStatus(res ? res.source : "fallback");
   }

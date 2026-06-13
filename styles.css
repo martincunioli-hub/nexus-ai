@@ -369,7 +369,8 @@ table.market tbody tr:last-child td { border-bottom: 0; }
 .news-card:hover { border-color: var(--text-faint); transform: translateY(-1px); }
 .news-top { display: flex; align-items: center; justify-content: space-between; }
 .news-source { font-size: 12px; color: var(--text-faint); }
-.news-title { font-weight: 600; font-size: 15px; line-height: 1.35; }
+.news-title { font-weight: 600; font-size: 15px; line-height: 1.35; color: var(--text); text-decoration: none; display: block; }
+a.news-title:hover { color: var(--primary); }
 .news-foot { display: flex; align-items: center; justify-content: space-between; margin-top: auto; }
 .impact { font-size: 11.5px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
 .impact-dots { display: flex; gap: 3px; }
@@ -529,6 +530,54 @@ table.market tbody tr:last-child td { border-bottom: 0; }
 .notif-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
 
 /* =====================================================================
+   CONVICCIÓN MÁXIMA / CONTEXTO / "SI HOY TUVIERA QUE ELEGIR"
+   ===================================================================== */
+/* Tarjeta rápida del Dashboard */
+.pick-card { margin-bottom: 16px; }
+.pick-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.pick-row { display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: 9px; cursor: pointer; transition: .15s; }
+.pick-row:hover { background: var(--surface-2); }
+.pick-medal { font-size: 20px; width: 26px; text-align: center; }
+.pick-body { flex: 1; min-width: 0; }
+.pick-top { font-size: 14px; }
+.pick-top .pick-conv { font-size: 11px; color: var(--primary); font-weight: 700; margin-left: 6px; }
+.pick-sub { font-size: 12px; margin-top: 2px; }
+.pick-score { font-weight: 700; font-size: 14px; min-width: 44px; text-align: right; }
+.pick-foot { margin-top: 8px; text-align: right; }
+
+/* Contexto del mercado */
+.ctx-card .m-val .faint { font-weight: 400; }
+
+/* Fichas de convicción */
+.cv-list { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 16px; }
+.cv-card { cursor: pointer; }
+.cv-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.cv-medal { font-size: 24px; }
+.cv-conv { margin-left: auto; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px;
+  background: var(--surface-3); color: var(--text-dim); }
+.cv-conv.conv-muyalta { background: var(--green-soft); color: var(--green); }
+.cv-conv.conv-alta { background: var(--primary-soft); color: var(--primary); }
+.cv-conv.conv-media { background: var(--surface-3); color: var(--text-dim); }
+.cv-conv.conv-baja { background: var(--red-soft); color: var(--red); }
+.cv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
+.cv-field { background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 9px; padding: 8px 11px;
+  display: flex; flex-direction: column; gap: 3px; }
+.cv-field span { font-size: 11px; color: var(--text-faint); }
+.cv-field strong { font-size: 14px; }
+.cv-tech { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.ind-chip.cv-pos { border-color: var(--green); color: var(--green); }
+.ind-chip.cv-neg { border-color: var(--red); color: var(--red); }
+.ind-chip.cv-neu { color: var(--text-dim); }
+.cv-text { font-size: 13px; line-height: 1.55; color: var(--text-dim); margin: 0 0 10px; }
+.cv-news { font-size: 12.5px; border-top: 1px solid var(--border-soft); padding-top: 10px; }
+.cv-news-label { color: var(--text-faint); }
+.cv-news-list { margin: 8px 0 0; padding-left: 16px; display: flex; flex-direction: column; gap: 4px; }
+.cv-news-list a { color: var(--text-dim); text-decoration: none; }
+.cv-news-list a:hover { color: var(--primary); text-decoration: underline; }
+.cv-why { font-size: 13px; line-height: 1.55; margin: 0 0 12px; }
+.cv-why:last-child { margin-bottom: 0; }
+
+/* =====================================================================
    RESPONSIVE
    ===================================================================== */
 @media (max-width: 1100px) {
@@ -542,6 +591,7 @@ table.market tbody tr:last-child td { border-bottom: 0; }
   .cols-3, .cols-2, .analysis-grid, .ind-grid, .dash-top, .split { grid-template-columns: 1fr; }
   .span-2 { grid-column: auto; }
   .news-grid { grid-template-columns: 1fr; }
+  .cv-grid { grid-template-columns: repeat(2, 1fr); }
   .updated, .status-live { display: none; }
   .view { padding: 18px 16px 50px; }
 }
