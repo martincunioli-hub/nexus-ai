@@ -5,7 +5,7 @@
    ===================================================================== */
 (function () {
   "use strict";
-  const DATA = window.NEXUS_DATA;
+  let DATA = null; // lo asigna boot() tras DataService.load() (datos reales o fallback)
   const $  = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
@@ -16,6 +16,7 @@
     tf: "1S",
     sort: { key: "marketCap", dir: "desc" },
     alertFilter: "todas",
+    perfHorizon: "d7",
     theme: "dark",
     fav: ["BTC", "ETH", "SOL"],
     prefs: { rsi: true, ema: true, vol: true, signal: true },
@@ -38,7 +39,7 @@
   /* ---------- Utilidades de formato ---------- */
   const SIGNAL_LABEL = { compra: "Compra", neutral: "Neutral", venta: "Venta" };
   const SIGNAL_CLASS = { compra: "buy", neutral: "neutral", venta: "sell" };
-  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : "—");
   const coinBy = (sym) => DATA.coins.find((c) => c.symbol === sym) || DATA.coins[0];
 
   function money(n) {
@@ -74,11 +75,19 @@
     return `<span class="coin-logo" style="background:${c.color};color:${c.fg || "#fff"};${dim}font-size:${fs}px">${c.symbol}</span>`;
   };
   const coinCell = (c) => `<span class="coin">${coinLogo(c)}<span><span class="coin-name">${c.name}</span> <span class="coin-sym">${c.symbol}</span></span></span>`;
-  const signalBadge = (s, sm) => `<span class="badge signal-${SIGNAL_CLASS[s]}"${sm ? ' style="font-size:11px;padding:3px 8px"' : ""}><span class="pip"></span>${SIGNAL_LABEL[s]}</span>`;
-  const riskBadge = (r) => `<span class="badge risk-${r}">${cap(r)}</span>`;
+  const signalBadge = (s, sm) => {
+    const st = sm ? ' style="font-size:11px;padding:3px 8px"' : "";
+    if (!s) return `<span class="badge sent-neutral"${st}>—</span>`; // pendiente Paso 2
+    return `<span class="badge signal-${SIGNAL_CLASS[s]}"${st}><span class="pip"></span>${SIGNAL_LABEL[s]}</span>`;
+  };
+  const riskBadge = (r) => (r ? `<span class="badge risk-${r}">${cap(r)}</span>` : `<span class="badge sent-neutral">—</span>`);
   const sentBadge = (s) => `<span class="badge sent-${s}">${cap(s)}</span>`;
-  const confbar = (v) => `<div class="confbar"><span style="width:${v}%"></span></div>`;
-  const reasonsList = (rs, max) => `<ul class="reasons">${rs.slice(0, max || 4).map((r) => `<li><span class="r-pip r-${r.p}"></span><span>${r.t}</span></li>`).join("")}</ul>`;
+  const confbar = (v) => `<div class="confbar"><span style="width:${v || 0}%"></span></div>`;
+  const reasonsList = (rs, max) => {
+    rs = rs || [];
+    if (!rs.length) return `<p class="faint" style="font-size:12.5px;margin:6px 0 0">Motivos disponibles tras el Paso 2 (análisis técnico).</p>`;
+    return `<ul class="reasons">${rs.slice(0, max || 4).map((r) => `<li><span class="r-pip r-${r.p}"></span><span>${r.t}</span></li>`).join("")}</ul>`;
+  };
 
   function sparkSVG(arr, up) {
     const w = 92, h = 30, min = Math.min(...arr), max = Math.max(...arr), rng = (max - min) || 1;
@@ -88,7 +97,9 @@
 
   function areaChart(arr, up, sup, res) {
     const W = 720, H = 260, pT = 14, pB = 16;
-    const lo = Math.min(...arr, sup), hi = Math.max(...arr, res), rng = (hi - lo) || 1;
+    const fin = (v) => typeof v === "number" && isFinite(v);
+    const extra = [sup, res].filter(fin); // soporte/resistencia opcionales (Paso 2)
+    const lo = Math.min(...arr, ...extra), hi = Math.max(...arr, ...extra), rng = (hi - lo) || 1;
     const X = (i) => (i / (arr.length - 1)) * W;
     const Y = (v) => pT + (1 - (v - lo) / rng) * (H - pT - pB);
     const line = arr.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
@@ -100,7 +111,7 @@
         <stop offset="0" stop-color="${col}" stop-opacity=".26"/><stop offset="1" stop-color="${col}" stop-opacity="0"/>
       </linearGradient></defs>
       <polygon points="0,${H - pB} ${line} ${W},${H - pB}" fill="url(#${gid})"/>
-      ${srLine(res, "var(--red)")}${srLine(sup, "var(--green)")}
+      ${fin(res) ? srLine(res, "var(--red)") : ""}${fin(sup) ? srLine(sup, "var(--green)") : ""}
       <polyline points="${line}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
     </svg>`;
   }
@@ -120,18 +131,128 @@
     </svg>`;
   }
 
-  /* ---------- Rankings derivados ---------- */
-  function riskScore(c) {
-    const base = c.risk === "alto" ? 100 : c.risk === "medio" ? 60 : 30;
-    return base + Math.abs(c.change24h) * 2 + (c.signal === "venta" ? 15 : c.signal === "compra" ? -5 : 0);
-  }
+  /* ---------- Rankings derivados (por score real del motor) ---------- */
   function rankings() {
     const cs = DATA.coins;
     return {
-      oport: cs.filter((c) => c.signal === "compra").sort((a, b) => b.confidence - a.confidence),
-      riesgos: [...cs].sort((a, b) => riskScore(b) - riskScore(a)),
-      momentum: [...cs].sort((a, b) => b.change7d - a.change7d),
+      oport: [...cs].sort((a, b) => (b.score || 0) - (a.score || 0)),    // mejores setups técnicos
+      riesgos: [...cs].sort((a, b) => (a.score || 0) - (b.score || 0)),  // peores setups / mayor cautela
+      momentum: [...cs].sort((a, b) => (b.change7d || 0) - (a.change7d || 0)),
     };
+  }
+  const fmtScore = (s) => (s == null ? "—" : (s >= 0 ? "+" : "") + s);
+
+  // Desglose visual de los factores que componen el score (barras de contribución).
+  // full=true añade el peso de cada factor (para el Perfil).
+  function factorBreakdown(factors, full) {
+    if (!factors || !factors.length) return "";
+    const max = Math.max.apply(null, factors.map((f) => Math.abs(f.contrib))) || 1;
+    const rows = [...factors].sort((a, b) => Math.abs(b.contrib) - Math.abs(a.contrib)).map((f) => {
+      const w = Math.max(4, Math.round(Math.abs(f.contrib) / max * 100));
+      const cls = f.contrib > 0 ? "pos" : f.contrib < 0 ? "neg" : "muted";
+      return `<div class="fbar">
+        <span class="fbar-name">${f.label} <span class="faint">${f.value}${full ? ` · ${Math.round(f.weight * 100)}%` : ""}</span></span>
+        <span class="fbar-track"><span class="fbar-fill ${cls}" style="width:${w}%"></span></span>
+        <span class="fbar-contrib mono ${cls}">${f.contrib > 0 ? "+" : ""}${f.contrib}</span>
+      </div>`;
+    }).join("");
+    return `<div class="fbars">${rows}</div>`;
+  }
+
+  // ¿Tiene análisis técnico completo? (para no mostrar activos sin info suficiente)
+  function hasFullAnalysis(c) {
+    return !!(c && c.signal != null && c.rsi != null && c.score != null);
+  }
+
+  // Valores crudos de indicadores (RSI, EMA20/50/200, MACD) como chips.
+  function indChips(c) {
+    const chips = [
+      c.rsi != null ? `RSI ${Math.round(c.rsi)}` : null,
+      c.ema20 != null ? `EMA20 ${money(c.ema20)}` : null,
+      c.ema50 != null ? `EMA50 ${money(c.ema50)}` : null,
+      c.ema200 != null ? `EMA200 ${money(c.ema200)}` : null,
+      c.macd ? `MACD ${c.macd.hist >= 0 ? "▲" : "▼"} ${fmtNum(c.macd.hist)}` : null,
+    ].filter(Boolean);
+    return `<div class="ind-chips">${chips.map((t) => `<span class="ind-chip">${t}</span>`).join("")}</div>`;
+  }
+
+  // Tabla auditable: cada factor con Valor, Sub-score, Peso y Contribución.
+  function factorTable(factors, score) {
+    if (!factors || !factors.length) return "";
+    const sc = (n) => (n > 0 ? "pos" : n < 0 ? "neg" : "muted");
+    const rows = [...factors].sort((a, b) => Math.abs(b.contrib) - Math.abs(a.contrib)).map((f) => `<tr>
+      <td>${f.label}</td>
+      <td class="faint">${f.value}</td>
+      <td class="mono ${sc(f.sub)}">${f.sub > 0 ? "+" : ""}${f.sub}</td>
+      <td class="mono faint">${Math.round(f.weight * 100)}%</td>
+      <td class="mono ${sc(f.contrib)}">${f.contrib > 0 ? "+" : ""}${f.contrib}</td>
+    </tr>`).join("");
+    return `<table class="ftable">
+      <thead><tr><th>Factor</th><th>Valor</th><th>Sub</th><th>Peso</th><th>Contrib.</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td colspan="4">Score final</td><td class="mono ${sc(score)}">${fmtScore(score)}</td></tr></tfoot>
+    </table>`;
+  }
+
+  // Fila rica de oportunidad (Dashboard): score, señal, riesgo y motivo principal.
+  function oppRow(c, i) {
+    const motivo = c.reasons && c.reasons[0] ? c.reasons[0].t : "—";
+    return `<div class="opp-item" data-coin="${c.symbol}">
+      <span class="rank-n">${i + 1}</span>
+      ${coinCell(c)}
+      <span class="opp-tags">${signalBadge(c.signal, true)}${riskBadge(c.risk)}<span class="mono opp-score ${c.score >= 0 ? "pos" : "neg"}">score ${fmtScore(c.score)}</span></span>
+      <span class="opp-why faint">${motivo}</span>
+    </div>`;
+  }
+
+  // Alertas configurables: se generan con los umbrales del usuario y se filtran por
+  // los tipos que tenga activados en Configuración. (Reusa el motor Analysis.)
+  const ALERT_PREF = { rsi_low: "rsi", rsi_high: "rsi", ema_cross: "ema", vol_spike: "vol", signal_change: "signal" };
+  function computeAlerts() {
+    if (!DATA || !DATA.coins || !window.Analysis) return [];
+    return window.Analysis.deriveAlerts(DATA.coins, state.thresholds).filter((a) => state.prefs[ALERT_PREF[a.type]] !== false);
+  }
+  function updateAlertBadge() {
+    const badge = $("#navAlertCount");
+    if (!badge) return;
+    const n = computeAlerts().length;
+    badge.textContent = n;
+    badge.dataset.zero = n === 0;
+  }
+
+  // Resumen ejecutivo automático ("¿Qué debería mirar hoy?") en lenguaje simple (máx. 5 líneas).
+  function dailyBriefing() {
+    const all = DATA.coins, m = DATA.market;
+    const cs = all.filter(hasFullAnalysis);
+    const tickers = (arr) => arr.map((c) => `<span class="bf-coin" data-coin="${c.symbol}">${c.symbol}</span>`).join(", ");
+    const byScore = [...cs].sort((a, b) => b.score - a.score);
+    const buys = cs.filter((c) => c.signal === "compra");
+    const sells = cs.filter((c) => c.signal === "venta");
+    const ups = all.filter((c) => c.change24h > 0).length;
+    const btc = cs.find((c) => c.symbol === "BTC");
+    const lines = [];
+
+    lines.push(`Mercado en <strong>${m.fearGreed.label.toLowerCase()}</strong> (índice ${m.fearGreed.value}); ${ups} de ${all.length} activos suben hoy.`);
+    if (btc) {
+      const rel = btc.trend === "alcista" ? "mantiene una estructura alcista"
+        : btc.score >= 0 ? "mantiene fortaleza relativa"
+        : "se mantiene bajo presión";
+      lines.push(`<strong>Bitcoin</strong> ${rel} (score ${fmtScore(btc.score)}, ${btc.signal}).`);
+    }
+    if (byScore.length) lines.push(`Mejores configuraciones técnicas: ${tickers(byScore.slice(0, 3))}.`);
+    const worst = [...cs].sort((a, b) => a.score - b.score).slice(0, 2);
+    if (worst.length) lines.push(`Mayores riesgos: ${tickers(worst)}.`);
+    if (sells.length === 0) lines.push(`No se detectan señales de venta fuertes${buys.length ? `; ${buys.length} de compra` : ""}.`);
+    else lines.push(`${buys.length} señal(es) de compra y ${sells.length} de venta entre los activos analizados.`);
+
+    return lines.slice(0, 5);
+  }
+  function briefingCard() {
+    const lines = dailyBriefing();
+    return `<div class="card briefing">
+      <div class="briefing-head"><span class="briefing-kicker">NEXUS · Hoy</span><h2>¿Qué debería mirar hoy?</h2></div>
+      <div class="briefing-lines">${lines.map((l) => `<p class="bf-line">${l}</p>`).join("")}</div>
+    </div>`;
   }
 
   /* =====================================================================
@@ -139,22 +260,34 @@
      ===================================================================== */
   function renderDashboard() {
     const m = DATA.market, r = rankings();
+    const hasSignals = DATA.coins.some((c) => c.signal != null); // Paso 2 activo?
     const fecha = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" });
 
-    const stat = (label, value, sub) => `<div class="card stat-card"><div class="stat-label">${label}</div><div class="stat-value">${value}</div>${sub ? `<div class="stat-sub">${sub}</div>` : ""}</div>`;
+    const list = (items, right) => items.length
+      ? `<div class="rank-list">${items.slice(0, 5).map((c, i) => `<div class="rank-item" data-coin="${c.symbol}"><span class="rank-n">${i + 1}</span>${coinCell(c)}<span class="right">${right(c)}</span></div>`).join("")}</div>`
+      : `<p class="muted" style="padding:14px 6px;font-size:12.5px">Se activa con el análisis técnico (Paso 2).</p>`;
 
-    const list = (items, right) => `<div class="rank-list">${items.slice(0, 5).map((c, i) => `<div class="rank-item" data-coin="${c.symbol}"><span class="rank-n">${i + 1}</span>${coinCell(c)}<span class="right">${right(c)}</span></div>`).join("")}</div>`;
-
-    const featured = ["SOL", "BTC", "XRP"].map(coinBy);
+    const featured = (() => {
+      const valid = DATA.coins.filter(hasFullAnalysis);
+      const byScore = [...valid].sort((a, b) => b.score - a.score);
+      const picks = [];
+      const add = (c) => { if (c && !picks.some((p) => p.symbol === c.symbol)) picks.push(c); };
+      add(byScore[0]);                       // mejor setup
+      add(byScore[byScore.length - 1]);      // mayor riesgo / más bajista
+      add(coinBy("BTC"));                     // referencia del mercado
+      return picks.length ? picks.slice(0, 3) : ["SOL", "BTC", "XRP"].map(coinBy);
+    })();
     const tile = (c) => `<div class="signal-tile" data-coin="${c.symbol}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">${coinCell(c)}${signalBadge(c.signal, true)}</div>
-      <div style="display:flex;justify-content:space-between;font-size:12px" class="muted"><span>Confianza</span><strong style="color:var(--text)">${c.confidence}%</strong></div>
+      <div style="display:flex;justify-content:space-between;font-size:12px" class="muted"><span>Confianza</span><strong style="color:var(--text)">${c.confidence != null ? c.confidence + "%" : "—"}</strong></div>
       <div style="margin:7px 0 9px">${confbar(c.confidence)}</div>
-      <div class="faint" style="font-size:12px;line-height:1.4">${c.reasons[0].t}</div>
+      <div class="faint" style="font-size:12px;line-height:1.4">${c.reasons && c.reasons[0] ? c.reasons[0].t : "Análisis técnico disponible en el Paso 2."}</div>
     </div>`;
 
     return `
       <div class="page-head"><h1>Dashboard</h1><p>${cap(fecha)} · visión general del mercado y señales del motor NEXUS.</p></div>
+
+      ${hasSignals ? briefingCard() : ""}
 
       <div class="dash-top">
         <div class="card fng">
@@ -178,16 +311,20 @@
       </div>
 
       <div class="section-head" style="margin-top:26px"><h2>Señales IA destacadas</h2><span class="link" data-view-link="analysis">Ver análisis →</span></div>
-      <div class="signal-strip">${featured.map(tile).join("")}</div>
+      ${hasSignals
+        ? `<div class="signal-strip">${featured.map(tile).join("")}</div>`
+        : `<div class="card"><p class="muted" style="margin:0;font-size:13px;line-height:1.55">Las señales IA (Compra / Neutral / Venta) se generan en el <strong>Paso 2</strong> a partir de RSI, MACD y EMAs. Los datos de mercado de arriba ya son reales (CoinGecko).</p></div>`}
 
-      <div class="grid cols-3" style="margin-top:26px">
-        <div class="card">
-          <div class="section-head"><h2>Top oportunidades</h2></div>
-          ${list(r.oport, (c) => signalBadge(c.signal, true))}
-        </div>
+      <div class="section-head" style="margin-top:26px"><h2>Top oportunidades</h2><span class="faint" style="font-size:12px">por score técnico</span></div>
+      <div class="card" style="padding:4px 16px">${(() => {
+        const opps = r.oport.filter(hasFullAnalysis).slice(0, 5);
+        return opps.length ? opps.map(oppRow).join("") : `<p class="muted" style="padding:16px 6px;font-size:13px">Sin oportunidades con datos suficientes en este momento.</p>`;
+      })()}</div>
+
+      <div class="grid cols-2" style="margin-top:16px">
         <div class="card">
           <div class="section-head"><h2>Top riesgos</h2></div>
-          ${list(r.riesgos, (c) => riskBadge(c.risk))}
+          ${list(r.riesgos.filter(hasFullAnalysis), (c) => `<span style="display:inline-flex;gap:7px;align-items:center;justify-content:flex-end">${riskBadge(c.risk)}<span class="mono ${c.score >= 0 ? "pos" : "neg"}" style="min-width:30px">${fmtScore(c.score)}</span></span>`)}
         </div>
         <div class="card">
           <div class="section-head"><h2>Tendencias del día</h2></div>
@@ -241,19 +378,24 @@
      ===================================================================== */
   function renderAnalysis() {
     const order = { compra: 0, neutral: 1, venta: 2 };
-    const cs = [...DATA.coins].sort((a, b) => order[a.signal] - order[b.signal] || b.confidence - a.confidence);
+    const hasSignals = DATA.coins.some((c) => c.signal != null);
+    const ord = (s) => (order[s] != null ? order[s] : 9);
+    const cs = [...DATA.coins].sort((a, b) => ord(a.signal) - ord(b.signal) || (b.confidence || 0) - (a.confidence || 0));
     const card = (c) => `<div class="card analysis-card" data-coin="${c.symbol}">
       <div class="analysis-top">${coinCell(c)}${signalBadge(c.signal)}</div>
       <div class="analysis-metrics">
-        <div class="metric"><div class="m-label">Confianza</div><div class="m-val">${c.confidence}%</div></div>
+        <div class="metric"><div class="m-label">Confianza</div><div class="m-val">${c.confidence != null ? c.confidence + "%" : "—"}</div></div>
         <div class="metric"><div class="m-label">Riesgo</div><div class="m-val" style="font-size:14px">${riskBadge(c.risk)}</div></div>
-        <div class="metric"><div class="m-label">Score</div><div class="m-val ${c.score >= 0 ? "pos" : "neg"}">${c.score >= 0 ? "+" : ""}${c.score}</div></div>
+        <div class="metric"><div class="m-label">Score</div><div class="m-val ${c.score == null ? "muted" : c.score >= 0 ? "pos" : "neg"}">${c.score != null ? (c.score >= 0 ? "+" : "") + c.score : "—"}</div></div>
       </div>
       ${confbar(c.confidence)}
+      ${c.factors && c.factors.length ? indChips(c) : ""}
       ${reasonsList(c.reasons, 3)}
+      ${c.factors && c.factors.length ? `<div class="section-sub">Desglose auditable del score</div>${factorTable(c.factors, c.score)}` : ""}
     </div>`;
     return `
       <div class="page-head"><h1>Análisis IA</h1><p>Motor determinista y explicable: combina RSI, MACD, EMA 20/50/200, volumen y tendencia. Cada señal expone sus motivos.</p></div>
+      ${hasSignals ? "" : `<div class="card" style="margin-bottom:16px"><p class="muted" style="margin:0;font-size:13px;line-height:1.55"><strong>Paso 2 pendiente.</strong> El análisis técnico (RSI, MACD, EMA 20/50/200) aún no está activo: por eso señal, confianza, riesgo y motivos figuran como “—”. Los datos de mercado ya son reales (CoinGecko).</p></div>`}
       <div class="analysis-grid">${cs.map(card).join("")}</div>`;
   }
 
@@ -265,7 +407,11 @@
     state.coin = c.symbol;
     const series = c.series[state.tf];
     const up = series[series.length - 1] >= series[0];
-    const z = c.rsi < 30 ? { t: "Sobreventa", cls: "pos" } : c.rsi > 70 ? { t: "Sobrecompra", cls: "neg" } : { t: "Neutral", cls: "muted" };
+    const hasAnalysis = c.signal != null;
+    const z = c.rsi == null ? { t: "—", cls: "muted" }
+      : c.rsi < 30 ? { t: "Sobreventa", cls: "pos" }
+      : c.rsi > 70 ? { t: "Sobrecompra", cls: "neg" }
+      : { t: "Neutral", cls: "muted" };
     const tfs = ["1D", "1S", "1M", "1A"];
     const lo = c.support, hi = c.resistance, pos = Math.max(2, Math.min(98, (c.price - lo) / (hi - lo) * 100));
     const relNews = DATA.news.filter((n) => n.sym === c.symbol);
@@ -294,10 +440,13 @@
 
         <div class="card">
           <div class="section-head"><h2>Análisis IA</h2></div>
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">${signalBadge(c.signal)}<span class="muted" style="font-size:13px">Confianza <strong style="color:var(--text)">${c.confidence}%</strong></span></div>
+          ${hasAnalysis ? `
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;flex-wrap:wrap">${signalBadge(c.signal)}<span class="muted" style="font-size:13px">Score <strong class="${c.score >= 0 ? "pos" : "neg"}">${fmtScore(c.score)}</strong></span><span class="muted" style="font-size:13px">Confianza <strong style="color:var(--text)">${c.confidence}%</strong></span><span class="muted" style="font-size:13px">Riesgo ${riskBadge(c.risk)}</span></div>
           ${confbar(c.confidence)}
           <p class="muted" style="font-size:13px;line-height:1.5;margin:12px 0 10px">Señal de <strong style="color:var(--text)">${SIGNAL_LABEL[c.signal]}</strong> en temporalidad ${state.tf}, con riesgo <strong style="color:var(--text)">${cap(c.risk)}</strong>. Motivos principales:</p>
           ${reasonsList(c.reasons, 4)}
+          ${c.factors && c.factors.length ? `<div class="section-sub">Desglose del score · ${fmtScore(c.score)} <span class="faint">(peso × indicador)</span></div>${factorBreakdown(c.factors, true)}` : ""}` : `
+          <p class="muted" style="font-size:13px;line-height:1.6;margin:6px 0 0">La señal (Compra / Neutral / Venta), confianza, riesgo y motivos se calculan en el <strong>Paso 2</strong> con RSI, MACD y EMAs. El precio, la variación y el volumen de esta moneda ya son reales.</p>`}
         </div>
       </div>
 
@@ -305,8 +454,8 @@
         <div class="card">
           <div class="section-head"><h2>Indicadores técnicos</h2><span class="faint" style="font-size:12px">temporalidad diaria</span></div>
           <div class="ind-grid">
-            ${ind("RSI (14)", `${c.rsi} · <span class="${z.cls}">${z.t}</span>`)}
-            ${ind("MACD (hist.)", `${c.macd.hist >= 0 ? "▲" : "▼"} ${fmtNum(c.macd.hist)}`, c.macd.hist >= 0 ? "pos" : "neg")}
+            ${ind("RSI (14)", c.rsi != null ? `${Math.round(c.rsi)} · <span class="${z.cls}">${z.t}</span>` : "—")}
+            ${ind("MACD (hist.)", c.macd ? `${c.macd.hist >= 0 ? "▲" : "▼"} ${fmtNum(c.macd.hist)}` : "—", c.macd ? (c.macd.hist >= 0 ? "pos" : "neg") : "")}
             ${ind("EMA 20", money(c.ema20))}
             ${ind("EMA 50", money(c.ema50))}
             ${ind("EMA 200", money(c.ema200))}
@@ -318,12 +467,14 @@
 
         <div class="card">
           <div class="section-head"><h2>Soportes y resistencias</h2></div>
+          ${hasAnalysis ? `
           <div class="range-track"><span class="range-fill" style="width:${pos}%"></span><span class="range-dot" style="left:${pos}%"></span></div>
           <div class="range-legend">
             <div><span class="dotc pos"></span> Soporte <strong class="mono">${money(lo)}</strong></div>
             <div><span class="dotc neg"></span> Resistencia <strong class="mono">${money(hi)}</strong></div>
           </div>
-          <p class="faint" style="font-size:12px;margin:12px 0 0;line-height:1.5">Precio a <strong class="pos">${((c.price - lo) / lo * 100).toFixed(1)}%</strong> sobre el soporte y a <strong class="neg">${((hi - c.price) / c.price * 100).toFixed(1)}%</strong> de la resistencia.</p>
+          <p class="faint" style="font-size:12px;margin:12px 0 0;line-height:1.5">Precio a <strong class="pos">${((c.price - lo) / lo * 100).toFixed(1)}%</strong> sobre el soporte y a <strong class="neg">${((hi - c.price) / c.price * 100).toFixed(1)}%</strong> de la resistencia.</p>` : `
+          <p class="muted" style="font-size:13px;line-height:1.6;margin:6px 0 0">Los niveles de soporte y resistencia se calculan en el <strong>Paso 2</strong> a partir del histórico de precios.</p>`}
         </div>
       </div>
 
@@ -356,7 +507,8 @@
       || (state.alertFilter === "ema" && a.type === "ema_cross")
       || (state.alertFilter === "vol" && a.type === "vol_spike")
       || (state.alertFilter === "signal" && a.type === "signal_change");
-    const items = DATA.alerts.filter(match);
+    const all = computeAlerts();
+    const items = all.filter(match);
     const row = (a) => { const c = coinBy(a.sym); return `<div class="alert-item" data-coin="${a.sym}">
       <div class="alert-ico ${a.severity}">${alertIcon(a.type)}</div>
       <div class="alert-body">
@@ -366,9 +518,9 @@
       <div class="alert-time">${a.time}</div>
     </div>`; };
     return `
-      <div class="page-head"><h1>Alertas</h1><p>Avisos automáticos por RSI extremo, cruces de EMA, volumen anormal y cambios de señal.</p></div>
+      <div class="page-head"><h1>Alertas</h1><p>Avisos por RSI extremo, cruces de EMA y volumen anormal. Activá/desactivá tipos y ajustá umbrales en <span class="link" data-view-link="settings">Configuración</span>.</p></div>
       <div class="filter-row">${filters.map(([k, l]) => `<button class="filter-btn ${state.alertFilter === k ? "active" : ""}" data-action="filter" data-filter="${k}">${l}</button>`).join("")}</div>
-      <div class="card" style="padding:0">${items.length ? items.map(row).join("") : '<p class="muted" style="padding:24px;text-align:center">Sin alertas para este filtro.</p>'}</div>`;
+      <div class="card" style="padding:0">${items.length ? items.map(row).join("") : `<p class="muted" style="padding:24px;text-align:center">${all.length ? "Sin alertas para este filtro." : "No hay alertas activas con tu configuración y umbrales actuales."}</p>`}</div>`;
   }
 
   /* =====================================================================
@@ -441,11 +593,75 @@
   }
 
   /* =====================================================================
+     PANTALLA · RENDIMIENTO DEL MOTOR
+     ===================================================================== */
+  function renderPerformance() {
+    const H = window.NexusHistory;
+    const records = H ? H.getAll() : [];
+    const head = `<div class="page-head"><h1>Rendimiento del Motor</h1><p>Validación objetiva de las señales: se evalúan a 1, 7 y 30 días con precios reales. No ajusta pesos — solo mide.</p></div>`;
+
+    if (!H || !records.length) {
+      return head + `<div class="card"><p class="muted" style="margin:0;line-height:1.6">Aún no hay señales registradas. Se registran automáticamente cuando un activo <strong>genera o cambia</strong> de señal, o cuando su score salta ≥ 20 puntos (cambio de convicción). Dejá la app abierta unos días y los resultados a 1/7/30 días se completarán solos.</p></div>`;
+    }
+
+    const h = state.perfHorizon || "d7";
+    const hLabel = { d1: "1 día", d7: "7 días", d30: "30 días" }[h];
+    const s = H.stats(h);
+    const pct = (v) => (v == null ? "—" : v.toFixed(0) + "%");
+    const ret = (v) => `<span class="${v >= 0 ? "pos" : "neg"}">${v >= 0 ? "+" : ""}${v.toFixed(2)}%</span>`;
+    const hbtn = (k, l) => `<button class="filter-btn ${h === k ? "active" : ""}" data-action="perf" data-h="${k}">${l}</button>`;
+    const errRate = s.hitRate == null ? null : 100 - s.hitRate;
+
+    const kpis = `<div class="grid cols-4">
+      <div class="card stat-card"><div class="stat-label">Señales totales</div><div class="stat-value">${s.total}</div><div class="stat-sub faint">${s.evaluated} evaluadas a ${hLabel}</div></div>
+      <div class="card stat-card"><div class="stat-label">Aciertos</div><div class="stat-value pos">${pct(s.hitRate)}</div><div class="stat-sub faint">${s.directional} señales direccionales</div></div>
+      <div class="card stat-card"><div class="stat-label">Errores</div><div class="stat-value neg">${pct(errRate)}</div><div class="stat-sub faint">Compra/Venta fallidas</div></div>
+      <div class="card stat-card"><div class="stat-label">Rentab. promedio</div><div class="stat-value ${s.avgRet >= 0 ? "pos" : "neg"}">${s.avgRet >= 0 ? "+" : ""}${s.avgRet.toFixed(2)}%</div><div class="stat-sub faint">media a ${hLabel}</div></div>
+    </div>`;
+
+    const grpRows = (g, isSignal) => Object.keys(g).sort((a, b) => g[b].n - g[a].n).map((key) => {
+      const o = g[key]; const hit = o.dir ? (o.hit / o.dir) * 100 : null;
+      const label = isSignal ? signalBadge(key, true) : `<span data-coin="${key}" style="cursor:pointer">${key}</span>`;
+      return `<tr><td>${label}</td><td>${o.n}</td><td>${pct(hit)}</td><td>${ret(o.ret / o.n)}</td></tr>`;
+    }).join("");
+
+    const TRIG = { inicial: "inicio", "señal": "cambio", "convicción": "convicción" };
+    const evalCell = (e) => (e ? ret(e.ret) : `<span class="faint">pendiente</span>`);
+    const logRows = [...records].sort((a, b) => b.ts - a.ts).slice(0, 25).map((r) => `<tr data-coin="${r.symbol}">
+      <td>${new Date(r.ts).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" })}</td>
+      <td>${r.symbol} <span class="faint" style="font-size:10px">${TRIG[r.trigger] || ""}</span></td>
+      <td>${signalBadge(r.signal, true)}</td>
+      <td class="mono">${fmtScore(r.score)}</td>
+      <td class="mono">${money(r.price)}</td>
+      <td>${evalCell(r.evals.d1)}</td>
+      <td>${evalCell(r.evals.d7)}</td>
+      <td>${evalCell(r.evals.d30)}</td>
+    </tr>`).join("");
+
+    return head + `
+      <div class="filter-row">${hbtn("d1", "1 día")}${hbtn("d7", "7 días")}${hbtn("d30", "30 días")}</div>
+      ${kpis}
+      <div class="grid cols-2" style="margin-top:16px">
+        <div class="card"><div class="section-head"><h2>Por activo</h2></div><table class="ftable"><thead><tr><th>Activo</th><th>Señales</th><th>Aciertos</th><th>Ret. prom.</th></tr></thead><tbody>${grpRows(s.byAsset, false)}</tbody></table></div>
+        <div class="card"><div class="section-head"><h2>Por tipo de señal</h2></div><table class="ftable"><thead><tr><th>Tipo</th><th>Señales</th><th>Aciertos</th><th>Ret. prom.</th></tr></thead><tbody>${grpRows(s.bySignal, true)}</tbody></table></div>
+      </div>
+      <div class="section-head" style="margin-top:26px"><h2>Señales registradas</h2><span class="faint" style="font-size:12px">últimas 25 · evaluación a 1/7/30 días</span></div>
+      <div class="table-wrap"><table class="ftable" style="min-width:620px"><thead><tr><th>Fecha</th><th>Activo</th><th>Señal</th><th>Score</th><th>Precio</th><th>1d</th><th>7d</th><th>30d</th></tr></thead><tbody>${logRows}</tbody></table></div>
+      <div class="filter-row" style="margin-top:18px">
+        <button class="filter-btn" data-action="hist-export">Exportar respaldo (JSON)</button>
+        <label class="filter-btn" style="cursor:pointer">Importar JSON<input type="file" accept="application/json" data-action="hist-import" style="display:none"></label>
+        <button class="filter-btn" data-action="hist-clear">Borrar historial</button>
+      </div>
+      <p class="faint" style="font-size:12px;margin-top:10px;line-height:1.5">Guardado en este navegador (localStorage, clave dedicada). Exportá un respaldo para no perderlo si limpiás datos del navegador o cambiás de equipo.${H.available ? "" : " ⚠ localStorage no disponible: el historial no persistirá al cerrar."}</p>`;
+  }
+
+  /* =====================================================================
      ROUTER + EVENTOS
      ===================================================================== */
   const VIEWS = {
     dashboard: renderDashboard, market: renderMarket, analysis: renderAnalysis,
-    profile: () => renderProfile(state.coin), alerts: renderAlerts, news: renderNews, settings: renderSettings,
+    profile: () => renderProfile(state.coin), alerts: renderAlerts, news: renderNews,
+    performance: renderPerformance, settings: renderSettings,
   };
 
   function setView(view, coinSym) {
@@ -482,8 +698,23 @@
       setTheme(el.checked ? "dark" : "light");
     } else if (a === "pref") {
       state.prefs[el.dataset.key] = el.checked; saveSettings();
+      updateAlertBadge(); if (state.view === "alerts") rerender();
     } else if (a === "thresh") {
-      state.thresholds[el.dataset.key] = parseFloat(el.value); saveSettings();
+      state.thresholds[el.dataset.key] = parseFloat(el.value) || 0; saveSettings();
+      updateAlertBadge(); if (state.view === "alerts") rerender();
+    } else if (a === "perf") {
+      state.perfHorizon = el.dataset.h; rerender();
+    } else if (a === "hist-export") {
+      const blob = new Blob([window.NexusHistory.exportJSON()], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url; link.download = "nexus-historial.json";
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    } else if (a === "hist-clear") {
+      if (window.confirm("¿Borrar todo el historial de señales? Esta acción no se puede deshacer.")) {
+        window.NexusHistory.clear(); rerender();
+      }
     }
   }
 
@@ -511,24 +742,47 @@
     const link = e.target.closest("[data-view-link]");
     if (link) { setView(link.dataset.viewLink); return; }
     const act = e.target.closest("[data-action]");
-    if (act && act.dataset.action !== "theme" && act.dataset.action !== "pref" && act.dataset.action !== "thresh") { handleAction(act); return; }
+    const changeDriven = act && ["theme", "pref", "thresh", "hist-import"].indexOf(act.dataset.action) > -1;
+    if (act && !changeDriven) { handleAction(act); return; }
     const coinEl = e.target.closest("[data-coin]");
     if (coinEl) { setView("profile", coinEl.dataset.coin); }
   }
   function onChange(e) {
     const act = e.target.closest("[data-action]");
-    if (act && (act.dataset.action === "theme" || act.dataset.action === "pref" || act.dataset.action === "thresh")) handleAction(act);
+    if (!act) return;
+    const a = act.dataset.action;
+    if (a === "theme" || a === "pref" || a === "thresh") { handleAction(act); return; }
+    if (a === "hist-import" && act.files && act.files[0]) {
+      const reader = new FileReader();
+      reader.onload = () => { window.NexusHistory.importJSON(reader.result) ? rerender() : window.alert("No se pudo importar: archivo inválido."); };
+      reader.readAsText(act.files[0]);
+    }
   }
 
-  /* ---------- Init ---------- */
-  function init() {
-    loadSettings();
-    document.documentElement.dataset.theme = state.theme;
-    const badge = $("#navAlertCount");
-    badge.textContent = DATA.alerts.length;
-    badge.dataset.zero = DATA.alerts.length === 0;
-    $("#lastUpdated").textContent = "Actualizado " + new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+  /* ---------- Estado de datos (topbar) ---------- */
+  function setStatus(source) {
+    const map = {
+      connecting: ["Conectando…", "var(--amber)"],
+      live: ["En vivo", "var(--green)"],
+      cache: ["Caché", "var(--amber)"],
+      fallback: ["Sin conexión · demo", "var(--red)"],
+    };
+    const [txt, col] = map[source] || ["—", "var(--text-faint)"];
+    const s = $("#dataStatus"), d = $("#dataDot");
+    if (s) s.textContent = txt;
+    if (d) d.style.background = col;
+  }
 
+  function applyData(res) {
+    DATA = (res && res.data) || window.NEXUS_FALLBACK;
+    window.NEXUS_DATA = DATA; // expone los datos vigentes (reales o fallback)
+    updateAlertBadge(); // contador según tipos/umbrales configurados
+    $("#lastUpdated").textContent = "Actualizado " + new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+    setStatus(res ? res.source : "fallback");
+  }
+
+  /* ---------- Init: listeners (una sola vez) ---------- */
+  function init() {
     document.addEventListener("click", onClick);
     document.addEventListener("change", onChange);
     $("#globalSearch").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(e.target.value); });
@@ -536,8 +790,37 @@
     $("#menuToggle").addEventListener("click", openSidebar);
     $("#scrim").addEventListener("click", closeSidebar);
     window.addEventListener("hashchange", () => { const v = location.hash.slice(1); if (v && v !== state.view && VIEWS[v]) setView(v); });
-
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(false); });
     setView(location.hash.slice(1) || "dashboard");
   }
-  document.addEventListener("DOMContentLoaded", init);
+
+  /* ---------- Refresco de datos ---------- */
+  let _refreshing = false, _lastRefresh = 0;
+  async function refresh(force) {
+    if (_refreshing) return;
+    if (!force && Date.now() - _lastRefresh < 90000) return; // throttle
+    _refreshing = true;
+    try {
+      const res = await window.DataService.load(force);
+      applyData(res);
+      _lastRefresh = Date.now();
+      if (state.view === "dashboard" || state.view === "market") rerender();
+    } finally { _refreshing = false; }
+  }
+
+  /* ---------- Arranque async: carga datos reales y luego renderiza ---------- */
+  async function boot() {
+    loadSettings();
+    document.documentElement.dataset.theme = state.theme;
+    setStatus("connecting");
+    let res = null;
+    try { if (window.DataService) res = await window.DataService.load(false); }
+    catch (e) { console.warn("[NEXUS] boot:", e); }
+    applyData(res); // si res es null → usa NEXUS_FALLBACK
+    _lastRefresh = Date.now();
+    init();
+    setInterval(() => { if (!document.hidden) refresh(true); }, 120000); // refresco suave 2 min
+  }
+
+  document.addEventListener("DOMContentLoaded", boot);
 })();

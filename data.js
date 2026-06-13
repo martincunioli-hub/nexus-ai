@@ -202,5 +202,7 @@
     summary: "El mercado opera con sesgo alcista moderado. Bitcoin lidera con una dominancia estable y el apetito de riesgo se mantiene en zona de codicia. Las altcoins de gran capitalización muestran fortaleza selectiva; conviene precaución en activos de baja capitalización por su volatilidad elevada.",
   };
 
-  window.NEXUS_DATA = { coins: base, news, alerts, market };
+  // Datos de RESPALDO (offline / si falla CoinGecko o se agota el límite).
+  // En producción el live lo arma services/dataService.js → window.NEXUS_DATA.
+  window.NEXUS_FALLBACK = { coins: base, news, alerts, market };
 })();
