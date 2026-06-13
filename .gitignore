@@ -22,3 +22,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Scripts de despliegue (no forman parte del sitio publicado)
+publicar.bat
+nexus-historial.json
