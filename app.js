@@ -595,64 +595,141 @@
   /* =====================================================================
      PANTALLA · RENDIMIENTO DEL MOTOR
      ===================================================================== */
+  /* ---------- Mini-gráficos SVG (reusan el estilo actual) ---------- */
+  function miniLine(vals) {
+    if (!vals || vals.length < 2) return `<div class="chart-empty">Necesita más datos evaluados</div>`;
+    const w = 300, h = 90;
+    const pts = vals.map((v, i) => `${(i / (vals.length - 1) * w).toFixed(1)},${(h - 3 - (v / 100) * (h - 8)).toFixed(1)}`).join(" ");
+    const y50 = (h - 3 - 0.5 * (h - 8)).toFixed(1);
+    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="evo-svg">
+      <line x1="0" y1="${y50}" x2="${w}" y2="${y50}" stroke="var(--border)" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
+      <polyline points="${pts}" fill="none" stroke="var(--primary)" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+    </svg>`;
+  }
+  function miniBars(vals) {
+    if (!vals || !vals.length) return `<div class="chart-empty">Necesita más datos</div>`;
+    const w = 300, h = 90, max = Math.max.apply(null, vals.concat(1)), bw = w / vals.length;
+    const bars = vals.map((v, i) => { const bh = (v / max) * (h - 8); return `<rect x="${(i * bw + 1).toFixed(1)}" y="${(h - bh - 1).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${bh.toFixed(1)}" rx="1" fill="var(--primary)"/>`; }).join("");
+    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="evo-svg">${bars}</svg>`;
+  }
+  function distBar(d) {
+    const total = (d.compra + d.neutral + d.venta) || 1;
+    const seg = (v, c) => (v ? `<span style="width:${(v / total * 100).toFixed(1)}%;background:${c}"></span>` : "");
+    return `<div class="distbar">${seg(d.compra, "var(--green)")}${seg(d.neutral, "var(--text-faint)")}${seg(d.venta, "var(--red)")}</div>
+      <div class="distlegend"><span><i style="background:var(--green)"></i>Compra ${d.compra}</span><span><i style="background:var(--text-faint)"></i>Neutral ${d.neutral}</span><span><i style="background:var(--red)"></i>Venta ${d.venta}</span></div>`;
+  }
+
+  /* ---------- Modal de trazabilidad de una señal histórica ---------- */
+  function recordModalHTML(r) {
+    const c = coinBy(r.symbol);
+    const fecha = new Date(r.ts).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    const ev = (e, lbl) => `<div class="metric"><div class="m-label">${lbl}</div><div class="m-val ${e ? (e.ret >= 0 ? "pos" : "neg") : "muted"}" style="font-size:15px">${e ? (e.ret >= 0 ? "+" : "") + e.ret.toFixed(2) + "%" : "pendiente"}</div></div>`;
+    return `<div class="modal-backdrop">
+      <div class="modal-card">
+        <span class="modal-close" title="Cerrar">✕</span>
+        <div class="coin" style="margin-bottom:4px">${coinLogo(c)}<span><span class="coin-name">${r.name || r.symbol}</span> <span class="coin-sym">${r.symbol}</span></span></div>
+        <div class="faint" style="font-size:12px;margin-bottom:12px">${fecha} · registro: ${r.trigger || "—"}</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px">${signalBadge(r.signal)}${riskBadge(r.risk)}<span class="muted" style="font-size:13px">Score <strong class="${r.score >= 0 ? "pos" : "neg"}">${fmtScore(r.score)}</strong></span><span class="muted" style="font-size:13px">Confianza <strong style="color:var(--text)">${r.confidence}%</strong></span><span class="muted" style="font-size:13px">Precio <strong class="mono">${money(r.price)}</strong></span></div>
+        <div class="analysis-metrics" style="margin-bottom:14px">${ev(r.evals.d1, "Resultado 1d")}${ev(r.evals.d7, "Resultado 7d")}${ev(r.evals.d30, "Resultado 30d")}</div>
+        <div class="section-sub">Indicadores al generar la señal</div>
+        ${indChips(r)}
+        <div class="section-sub">Desglose del score (peso × indicador)</div>
+        ${r.factors && r.factors.length ? factorTable(r.factors, r.score) : `<p class="faint" style="font-size:12px">Trazabilidad detallada no disponible (señal registrada antes de esta versión).</p>`}
+        ${r.reasons && r.reasons.length ? `<div class="section-sub">Motivos</div>${reasonsList(r.reasons, 4)}` : ""}
+        <div style="margin-top:14px"><span class="link" data-coin="${r.symbol}">Ver perfil actual de ${r.symbol} →</span></div>
+      </div>
+    </div>`;
+  }
+  function openRecordModal(id) {
+    const r = window.NexusHistory && window.NexusHistory.getById(id);
+    if (!r) return;
+    let host = document.getElementById("nexusModal");
+    if (!host) { host = document.createElement("div"); host.id = "nexusModal"; document.body.appendChild(host); }
+    host.innerHTML = recordModalHTML(r);
+  }
+  function closeModal() { const host = document.getElementById("nexusModal"); if (host) host.innerHTML = ""; }
+
   function renderPerformance() {
     const H = window.NexusHistory;
     const records = H ? H.getAll() : [];
-    const head = `<div class="page-head"><h1>Rendimiento del Motor</h1><p>Validación objetiva de las señales: se evalúan a 1, 7 y 30 días con precios reales. No ajusta pesos — solo mide.</p></div>`;
-
+    const head = `<div class="page-head"><h1>Rendimiento del Motor</h1><p>Estadísticas, historial auditable y observaciones del motor. Todo se mide con precios reales; no ajusta pesos ni el scoring.</p></div>`;
     if (!H || !records.length) {
-      return head + `<div class="card"><p class="muted" style="margin:0;line-height:1.6">Aún no hay señales registradas. Se registran automáticamente cuando un activo <strong>genera o cambia</strong> de señal, o cuando su score salta ≥ 20 puntos (cambio de convicción). Dejá la app abierta unos días y los resultados a 1/7/30 días se completarán solos.</p></div>`;
+      return head + `<div class="card"><p class="muted" style="margin:0;line-height:1.6">Aún no hay señales registradas. Se registran automáticamente cuando un activo <strong>genera o cambia</strong> de señal, o cuando su score salta ≥ 20 puntos. Dejá la app abierta unos días y las estadísticas se completarán solas.</p></div>`;
     }
 
     const h = state.perfHorizon || "d7";
-    const hLabel = { d1: "1 día", d7: "7 días", d30: "30 días" }[h];
-    const s = H.stats(h);
-    const pct = (v) => (v == null ? "—" : v.toFixed(0) + "%");
+    const s = H.stats(h), sm = H.summary(), evo = H.evolution(), ins = H.insights();
+    const pct = (v) => (v == null ? "—" : Math.round(v) + "%");
     const ret = (v) => `<span class="${v >= 0 ? "pos" : "neg"}">${v >= 0 ? "+" : ""}${v.toFixed(2)}%</span>`;
+    const sret = (v) => (v == null ? "—" : `<span class="${v >= 0 ? "pos" : "neg"}">${v >= 0 ? "+" : ""}${v.toFixed(2)}%</span>`);
     const hbtn = (k, l) => `<button class="filter-btn ${h === k ? "active" : ""}" data-action="perf" data-h="${k}">${l}</button>`;
-    const errRate = s.hitRate == null ? null : 100 - s.hitRate;
+    const card = (label, value, sub) => `<div class="card stat-card"><div class="stat-label">${label}</div><div class="stat-value">${value}</div>${sub ? `<div class="stat-sub faint">${sub}</div>` : ""}</div>`;
 
-    const kpis = `<div class="grid cols-4">
-      <div class="card stat-card"><div class="stat-label">Señales totales</div><div class="stat-value">${s.total}</div><div class="stat-sub faint">${s.evaluated} evaluadas a ${hLabel}</div></div>
-      <div class="card stat-card"><div class="stat-label">Aciertos</div><div class="stat-value pos">${pct(s.hitRate)}</div><div class="stat-sub faint">${s.directional} señales direccionales</div></div>
-      <div class="card stat-card"><div class="stat-label">Errores</div><div class="stat-value neg">${pct(errRate)}</div><div class="stat-sub faint">Compra/Venta fallidas</div></div>
-      <div class="card stat-card"><div class="stat-label">Rentab. promedio</div><div class="stat-value ${s.avgRet >= 0 ? "pos" : "neg"}">${s.avgRet >= 0 ? "+" : ""}${s.avgRet.toFixed(2)}%</div><div class="stat-sub faint">media a ${hLabel}</div></div>
+    const stats4 = `<div class="grid cols-4">
+      ${card("Señales totales", sm.total)}
+      ${card("Compras", `<span class="pos">${sm.compras}</span>`)}
+      ${card("Ventas", `<span class="neg">${sm.ventas}</span>`)}
+      ${card("Neutrales", `<span class="muted">${sm.neutrales}</span>`)}
+      ${card("Aciertos 1d", pct(sm.hit1))}
+      ${card("Aciertos 7d", pct(sm.hit7))}
+      ${card("Aciertos 30d", pct(sm.hit30))}
+      ${card("Retorno prom.", sret(sm.avgRet), "por señal (7d)")}
+      ${card("Mejor activo", sm.bestAsset ? sm.bestAsset.symbol : "—", sm.bestAsset ? `${sm.bestAsset.ret >= 0 ? "+" : ""}${sm.bestAsset.ret.toFixed(1)}% (7d)` : "")}
+      ${card("Peor activo", sm.worstAsset ? sm.worstAsset.symbol : "—", sm.worstAsset ? `${sm.worstAsset.ret >= 0 ? "+" : ""}${sm.worstAsset.ret.toFixed(1)}% (7d)` : "")}
     </div>`;
+
+    const evoCards = `<div class="grid cols-3" style="margin-top:16px">
+      <div class="card"><div class="section-head"><h2>Acierto acumulado</h2><span class="faint" style="font-size:12px">7d</span></div>${miniLine(evo.cumAccuracy.map((p) => p.acc))}</div>
+      <div class="card"><div class="section-head"><h2>Señales por semana</h2></div>${miniBars(evo.perWeek)}</div>
+      <div class="card"><div class="section-head"><h2>Distribución</h2></div>${distBar(evo.distribution)}</div>
+    </div>`;
+
+    const obs = `<div class="card" style="margin-top:16px"><div class="section-head"><h2>Observaciones del motor</h2><span class="faint" style="font-size:12px">insights automáticos</span></div>
+      <ul class="reasons">${ins.lines.map((l) => `<li><span class="r-pip r-neu"></span><span>${l}</span></li>`).join("")}</ul></div>`;
 
     const grpRows = (g, isSignal) => Object.keys(g).sort((a, b) => g[b].n - g[a].n).map((key) => {
       const o = g[key]; const hit = o.dir ? (o.hit / o.dir) * 100 : null;
       const label = isSignal ? signalBadge(key, true) : `<span data-coin="${key}" style="cursor:pointer">${key}</span>`;
       return `<tr><td>${label}</td><td>${o.n}</td><td>${pct(hit)}</td><td>${ret(o.ret / o.n)}</td></tr>`;
     }).join("");
+    const tables = `<div class="grid cols-2" style="margin-top:16px">
+      <div class="card"><div class="section-head"><h2>Por activo</h2><span class="faint" style="font-size:12px">${{ d1: "1d", d7: "7d", d30: "30d" }[h]}</span></div><table class="ftable"><thead><tr><th>Activo</th><th>Señales</th><th>Aciertos</th><th>Ret. prom.</th></tr></thead><tbody>${grpRows(s.byAsset, false)}</tbody></table></div>
+      <div class="card"><div class="section-head"><h2>Por tipo de señal</h2></div><table class="ftable"><thead><tr><th>Tipo</th><th>Señales</th><th>Aciertos</th><th>Ret. prom.</th></tr></thead><tbody>${grpRows(s.bySignal, true)}</tbody></table></div>
+    </div>`;
 
     const TRIG = { inicial: "inicio", "señal": "cambio", "convicción": "convicción" };
-    const evalCell = (e) => (e ? ret(e.ret) : `<span class="faint">pendiente</span>`);
-    const logRows = [...records].sort((a, b) => b.ts - a.ts).slice(0, 25).map((r) => `<tr data-coin="${r.symbol}">
+    const evalCell = (e) => (e ? ret(e.ret) : `<span class="faint">—</span>`);
+    const estado = (r) => (r.evals.d1 || r.evals.d7 || r.evals.d30) ? `<span class="badge sent-positivo" style="font-size:10.5px">Evaluado</span>` : `<span class="badge sent-neutral" style="font-size:10.5px">Pendiente</span>`;
+    const logRows = [...records].sort((a, b) => b.ts - a.ts).map((r) => `<tr data-record="${r.id}" title="Ver trazabilidad">
       <td>${new Date(r.ts).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" })}</td>
       <td>${r.symbol} <span class="faint" style="font-size:10px">${TRIG[r.trigger] || ""}</span></td>
-      <td>${signalBadge(r.signal, true)}</td>
-      <td class="mono">${fmtScore(r.score)}</td>
       <td class="mono">${money(r.price)}</td>
+      <td class="mono">${fmtScore(r.score)}</td>
+      <td>${signalBadge(r.signal, true)}</td>
+      <td>${riskBadge(r.risk)}</td>
+      <td class="mono">${r.confidence != null ? r.confidence + "%" : "—"}</td>
       <td>${evalCell(r.evals.d1)}</td>
       <td>${evalCell(r.evals.d7)}</td>
       <td>${evalCell(r.evals.d30)}</td>
+      <td>${estado(r)}</td>
     </tr>`).join("");
 
     return head + `
-      <div class="filter-row">${hbtn("d1", "1 día")}${hbtn("d7", "7 días")}${hbtn("d30", "30 días")}</div>
-      ${kpis}
-      <div class="grid cols-2" style="margin-top:16px">
-        <div class="card"><div class="section-head"><h2>Por activo</h2></div><table class="ftable"><thead><tr><th>Activo</th><th>Señales</th><th>Aciertos</th><th>Ret. prom.</th></tr></thead><tbody>${grpRows(s.byAsset, false)}</tbody></table></div>
-        <div class="card"><div class="section-head"><h2>Por tipo de señal</h2></div><table class="ftable"><thead><tr><th>Tipo</th><th>Señales</th><th>Aciertos</th><th>Ret. prom.</th></tr></thead><tbody>${grpRows(s.bySignal, true)}</tbody></table></div>
-      </div>
-      <div class="section-head" style="margin-top:26px"><h2>Señales registradas</h2><span class="faint" style="font-size:12px">últimas 25 · evaluación a 1/7/30 días</span></div>
-      <div class="table-wrap"><table class="ftable" style="min-width:620px"><thead><tr><th>Fecha</th><th>Activo</th><th>Señal</th><th>Score</th><th>Precio</th><th>1d</th><th>7d</th><th>30d</th></tr></thead><tbody>${logRows}</tbody></table></div>
+      <div class="filter-row">${hbtn("d1", "1 día")}${hbtn("d7", "7 días")}${hbtn("d30", "30 días")}<span class="faint" style="align-self:center;font-size:12px;margin-left:6px">horizonte para comparativas</span></div>
+      <div class="section-head"><h2>Centro de estadísticas</h2></div>
+      ${stats4}
+      <div class="section-head" style="margin-top:26px"><h2>Evolución</h2></div>
+      ${evoCards}
+      ${obs}
+      ${tables}
+      <div class="section-head" style="margin-top:26px"><h2>Historial completo</h2><span class="faint" style="font-size:12px">${records.length} señales · clic en una fila para su trazabilidad</span></div>
+      <div class="table-wrap"><table class="ftable" style="min-width:780px"><thead><tr><th>Fecha</th><th>Activo</th><th>Precio</th><th>Score</th><th>Señal</th><th>Riesgo</th><th>Conf.</th><th>1d</th><th>7d</th><th>30d</th><th>Estado</th></tr></thead><tbody>${logRows}</tbody></table></div>
       <div class="filter-row" style="margin-top:18px">
         <button class="filter-btn" data-action="hist-export">Exportar respaldo (JSON)</button>
         <label class="filter-btn" style="cursor:pointer">Importar JSON<input type="file" accept="application/json" data-action="hist-import" style="display:none"></label>
         <button class="filter-btn" data-action="hist-clear">Borrar historial</button>
       </div>
-      <p class="faint" style="font-size:12px;margin-top:10px;line-height:1.5">Guardado en este navegador (localStorage, clave dedicada). Exportá un respaldo para no perderlo si limpiás datos del navegador o cambiás de equipo.${H.available ? "" : " ⚠ localStorage no disponible: el historial no persistirá al cerrar."}</p>`;
+      <p class="faint" style="font-size:12px;margin-top:10px;line-height:1.5">Guardado en este navegador (localStorage). Exportá un respaldo para no perderlo.${H.available ? "" : " ⚠ localStorage no disponible: el historial no persistirá al cerrar."}</p>`;
   }
 
   /* =====================================================================
@@ -666,6 +743,7 @@
 
   function setView(view, coinSym) {
     if (!VIEWS[view]) view = "dashboard";
+    closeModal(); // cerrar el modal de trazabilidad al navegar
     state.view = view;
     if (coinSym) state.coin = coinSym;
     $$(".nav-item").forEach((n) => n.classList.toggle("active", n.dataset.view === view));
@@ -737,6 +815,7 @@
   }
 
   function onClick(e) {
+    if (e.target.classList && (e.target.classList.contains("modal-backdrop") || e.target.closest(".modal-close"))) { closeModal(); return; }
     const nav = e.target.closest(".nav-item");
     if (nav) { e.preventDefault(); setView(nav.dataset.view); return; }
     const link = e.target.closest("[data-view-link]");
@@ -744,6 +823,8 @@
     const act = e.target.closest("[data-action]");
     const changeDriven = act && ["theme", "pref", "thresh", "hist-import"].indexOf(act.dataset.action) > -1;
     if (act && !changeDriven) { handleAction(act); return; }
+    const recEl = e.target.closest("[data-record]");
+    if (recEl) { openRecordModal(recEl.dataset.record); return; }
     const coinEl = e.target.closest("[data-coin]");
     if (coinEl) { setView("profile", coinEl.dataset.coin); }
   }
@@ -791,6 +872,7 @@
     $("#scrim").addEventListener("click", closeSidebar);
     window.addEventListener("hashchange", () => { const v = location.hash.slice(1); if (v && v !== state.view && VIEWS[v]) setView(v); });
     document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(false); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
     setView(location.hash.slice(1) || "dashboard");
   }
 

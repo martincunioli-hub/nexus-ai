@@ -43,6 +43,11 @@ window.NexusHistory = (function () {
         symbol: c.symbol, name: c.name,
         price: c.price, score: c.score, signal: c.signal, risk: c.risk, confidence: c.confidence,
         trigger,
+        // --- snapshot técnico para trazabilidad (igual que el análisis actual) ---
+        rsi: c.rsi, macd: c.macd, ema20: c.ema20, ema50: c.ema50, ema200: c.ema200,
+        trend: c.trend, volRatio: c._volRatio,
+        reasons: c.reasons || [],
+        factors: c.factors || null,
         evals: { d1: null, d7: null, d30: null },
       });
       changed = true;
@@ -114,6 +119,67 @@ window.NexusHistory = (function () {
     };
   }
 
+  // Resumen general para el Centro de Estadísticas.
+  function summary() {
+    const arr = getAll();
+    const counts = { compra: 0, neutral: 0, venta: 0 };
+    arr.forEach((r) => { if (counts[r.signal] != null) counts[r.signal]++; });
+    const hr = (h) => stats(h).hitRate;
+    const ev7 = arr.filter((r) => r.evals.d7);
+    const avgRet = ev7.length ? ev7.reduce((s, r) => s + r.evals.d7.ret, 0) / ev7.length : null;
+    const ba = stats("d7").byAsset;
+    const assets = Object.keys(ba).map((k) => ({ symbol: k, ret: ba[k].ret / ba[k].n, n: ba[k].n }));
+    assets.sort((a, b) => b.ret - a.ret);
+    return {
+      total: arr.length,
+      compras: counts.compra, ventas: counts.venta, neutrales: counts.neutral,
+      hit1: hr("d1"), hit7: hr("d7"), hit30: hr("d30"),
+      avgRet,
+      bestAsset: assets.length ? assets[0] : null,
+      worstAsset: assets.length ? assets[assets.length - 1] : null,
+    };
+  }
+
+  // Series para los gráficos de evolución.
+  function evolution() {
+    const arr = [...getAll()].sort((a, b) => a.ts - b.ts);
+    const cum = []; let hit = 0, n = 0;
+    arr.forEach((r) => {
+      const e = r.evals.d7;
+      if (e && e.ok != null) { n++; if (e.ok) hit++; cum.push({ ts: r.ts, acc: (hit / n) * 100 }); }
+    });
+    const weeks = {};
+    arr.forEach((r) => { const wk = Math.floor(r.ts / (7 * 86400000)); weeks[wk] = (weeks[wk] || 0) + 1; });
+    const perWeek = Object.keys(weeks).sort().map((k) => weeks[k]);
+    const dist = { compra: 0, neutral: 0, venta: 0 };
+    arr.forEach((r) => { if (dist[r.signal] != null) dist[r.signal]++; });
+    return { cumAccuracy: cum, perWeek, distribution: dist };
+  }
+
+  // Observaciones automáticas (estadística descriptiva sobre el historial; sin ML).
+  function insights() {
+    const arr = getAll().filter((r) => r.evals.d7 && r.evals.d7.ok != null);
+    const MIN = 3;
+    const rate = (recs) => (recs.length ? Math.round((recs.filter((r) => r.evals.d7.ok).length / recs.length) * 100) : null);
+    if (arr.length < MIN) {
+      return { ready: false, lines: ["Aún hay pocas señales evaluadas a 7 días. Las observaciones aparecerán a medida que se acumule historial real."] };
+    }
+    const overall = rate(arr);
+    const out = [];
+    const rsiBand = arr.filter((r) => r.signal === "compra" && r.rsi != null && r.rsi >= 40 && r.rsi <= 55);
+    if (rsiBand.length >= MIN) out.push(`Las señales Compra con RSI 40–55 tuvieron ${rate(rsiBand)}% de acierto (n=${rsiBand.length}).`);
+    const emaUp = arr.filter((r) => r.factors && r.factors.some((f) => f.key === "ema" && f.sub > 0));
+    if (emaUp.length >= MIN) out.push(`Con EMA alineadas al alza, el acierto fue ${rate(emaUp)}% vs ${overall}% general (n=${emaUp.length}).`);
+    const buys = arr.filter((r) => r.signal === "compra"), sells = arr.filter((r) => r.signal === "venta");
+    if (buys.length >= MIN && sells.length >= MIN) out.push(`Acierto de Compra ${rate(buys)}% (n=${buys.length}) vs Venta ${rate(sells)}% (n=${sells.length}).`);
+    const sellBtc = sells.filter((r) => r.symbol === "BTC"), sellAlt = sells.filter((r) => r.symbol !== "BTC");
+    if (sellBtc.length >= MIN && sellAlt.length >= MIN) out.push(`Señales Venta: BTC ${rate(sellBtc)}% vs altcoins ${rate(sellAlt)}% (n=${sellBtc.length}/${sellAlt.length}).`);
+    const macdUp = arr.filter((r) => r.signal === "compra" && r.macd && r.macd.hist > 0);
+    if (macdUp.length >= MIN) out.push(`Compras con MACD al alza: ${rate(macdUp)}% de acierto (n=${macdUp.length}).`);
+    if (!out.length) out.push(`Acierto general a 7 días: ${overall}% (n=${arr.length}). Falta más historial para desglosar por factor.`);
+    return { ready: true, lines: out };
+  }
+
   // Respaldo manual (red de seguridad ante borrado de datos / cambio de equipo).
   function exportJSON() {
     return JSON.stringify({ v: 1, exportedAt: Date.now(), records: getAll() }, null, 2);
@@ -132,5 +198,7 @@ window.NexusHistory = (function () {
   }
   function clear() { C.remove(KEY); }
 
-  return { record, evaluate, stats, getAll, exportJSON, importJSON, clear, available: C.available };
+  function getById(id) { return getAll().filter((r) => r.id === id)[0] || null; }
+
+  return { record, evaluate, stats, summary, evolution, insights, getAll, getById, exportJSON, importJSON, clear, available: C.available };
 })();
