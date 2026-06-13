@@ -221,6 +221,49 @@
     badge.dataset.zero = n === 0;
   }
 
+  /* ---------- Centro de notificaciones (in-app, reusa el motor de eventos) ---------- */
+  const NOTIF_KEY = "notifs.seen";
+  const notifKey = (a) => a.type + ":" + a.sym;                 // identidad estable (sin el valor, evita spam)
+  const notifSeen = () => (window.NexusCache && window.NexusCache.get(NOTIF_KEY, Infinity)) || [];
+  const currentNotifs = () => computeAlerts().map((a) => Object.assign({}, a, { key: notifKey(a) }));
+  function notifMeta(a) {
+    if (a.type === "signal_change" && /→\s*Compra/.test(a.message)) return { label: "Nueva oportunidad", sev: "info" };
+    const L = { signal_change: "Cambio de señal", rsi_low: "RSI extremo", rsi_high: "RSI extremo", vol_spike: "Volumen anormal", ema_cross: "Cruce EMA" };
+    return { label: L[a.type] || "Alerta", sev: a.severity };
+  }
+  // Poda los "vistos" a los que siguen activos y actualiza el contador de no leídos.
+  function refreshNotifs() {
+    const cur = currentNotifs(), keys = cur.map((n) => n.key);
+    const seen = notifSeen().filter((k) => keys.indexOf(k) > -1);
+    if (window.NexusCache) window.NexusCache.set(NOTIF_KEY, seen);
+    const unread = cur.filter((n) => seen.indexOf(n.key) === -1).length;
+    const b = $("#notifCount");
+    if (b) { b.textContent = unread; b.dataset.zero = unread === 0; }
+    return { cur, seen };
+  }
+  function markNotifsSeen() {
+    if (window.NexusCache) window.NexusCache.set(NOTIF_KEY, currentNotifs().map((n) => n.key));
+    const b = $("#notifCount"); if (b) { b.textContent = "0"; b.dataset.zero = true; }
+  }
+  function notifPanelHTML() {
+    const { cur, seen } = refreshNotifs();
+    if (!cur.length) return `<div class="notif-head">Notificaciones</div><div class="notif-empty">Sin notificaciones activas.</div>`;
+    const items = cur.map((n) => {
+      const m = notifMeta(n), c = coinBy(n.sym), isNew = seen.indexOf(n.key) === -1;
+      return `<div class="notif-item ${isNew ? "nuevo" : ""}" data-coin="${n.sym}">
+        <div class="alert-ico ${m.sev}" style="width:30px;height:30px">${alertIcon(n.type)}</div>
+        <div class="notif-body"><div class="notif-msg">${n.message}</div><div class="notif-meta">${c.symbol} · ${m.label} · ${n.time}</div></div>
+      </div>`;
+    }).join("");
+    return `<div class="notif-head">Notificaciones <span class="faint" style="font-weight:400">${cur.length}</span></div>${items}`;
+  }
+  function closeNotif() { const p = $("#notifPanel"); if (p) p.hidden = true; }
+  function toggleNotif() {
+    const p = $("#notifPanel"); if (!p) return;
+    if (p.hidden) { p.innerHTML = notifPanelHTML(); p.hidden = false; markNotifsSeen(); }
+    else { p.hidden = true; }
+  }
+
   // Resumen ejecutivo automático ("¿Qué debería mirar hoy?") en lenguaje simple (máx. 5 líneas).
   function dailyBriefing() {
     const all = DATA.coins, m = DATA.market;
@@ -863,7 +906,7 @@
 
   function setView(view, coinSym) {
     if (!VIEWS[view]) view = "dashboard";
-    closeModal(); // cerrar el modal de trazabilidad al navegar
+    closeModal(); closeNotif(); // cerrar modal y panel de notificaciones al navegar
     state.view = view;
     if (coinSym) state.coin = coinSym;
     $$(".nav-item").forEach((n) => n.classList.toggle("active", n.dataset.view === view));
@@ -936,6 +979,7 @@
 
   function onClick(e) {
     if (e.target.classList && (e.target.classList.contains("modal-backdrop") || e.target.closest(".modal-close"))) { closeModal(); return; }
+    if (!e.target.closest("#notif")) closeNotif(); // clic fuera del panel de notificaciones
     const nav = e.target.closest(".nav-item");
     if (nav) { e.preventDefault(); setView(nav.dataset.view); return; }
     const link = e.target.closest("[data-view-link]");
@@ -978,6 +1022,7 @@
     DATA = (res && res.data) || window.NEXUS_FALLBACK;
     window.NEXUS_DATA = DATA; // expone los datos vigentes (reales o fallback)
     updateAlertBadge(); // contador según tipos/umbrales configurados
+    refreshNotifs();    // contador de notificaciones no leídas
     $("#lastUpdated").textContent = "Actualizado " + new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
     setStatus(res ? res.source : "fallback");
   }
@@ -988,11 +1033,12 @@
     document.addEventListener("change", onChange);
     $("#globalSearch").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(e.target.value); });
     $("#themeToggle").addEventListener("click", () => setTheme(state.theme === "dark" ? "light" : "dark"));
+    $("#notifBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleNotif(); });
     $("#menuToggle").addEventListener("click", openSidebar);
     $("#scrim").addEventListener("click", closeSidebar);
     window.addEventListener("hashchange", () => { const v = location.hash.slice(1); if (v && v !== state.view && VIEWS[v]) setView(v); });
     document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(false); });
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeModal(); closeNotif(); } });
     setView(location.hash.slice(1) || "dashboard");
   }
 

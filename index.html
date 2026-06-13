@@ -94,6 +94,13 @@
             <span class="dot" id="dataDot"></span> <span id="dataStatus">Conectando…</span>
           </span>
           <span class="updated" id="lastUpdated">—</span>
+          <div class="notif" id="notif">
+            <button class="icon-btn" id="notifBtn" aria-label="Notificaciones" title="Notificaciones">
+              <svg viewBox="0 0 24 24" class="ico"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+              <span class="notif-count" id="notifCount" data-zero="true">0</span>
+            </button>
+            <div class="notif-panel" id="notifPanel" hidden></div>
+          </div>
           <button class="icon-btn" id="themeToggle" aria-label="Cambiar tema" title="Tema claro/oscuro">
             <svg viewBox="0 0 24 24" class="ico ico-moon"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
             <svg viewBox="0 0 24 24" class="ico ico-sun"><circle cx="12" cy="12" r="4.5"/><path d="M12 1.5v3M12 19.5v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1.5 12h3M19.5 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
