@@ -732,13 +732,109 @@
       <p class="faint" style="font-size:12px;margin-top:10px;line-height:1.5">Guardado en este navegador (localStorage). Exportá un respaldo para no perderlo.${H.available ? "" : " ⚠ localStorage no disponible: el historial no persistirá al cerrar."}</p>`;
   }
 
+  function downloadJSON(text, filename) {
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+
+  /* =====================================================================
+     PANTALLA · ESTADO DEL SISTEMA
+     ===================================================================== */
+  function ago(ts) {
+    if (!ts) return "—";
+    const m = Math.round((Date.now() - ts) / 60000);
+    return m < 1 ? "recién" : m < 60 ? `hace ${m} min` : `hace ${Math.round(m / 60)} h`;
+  }
+  function renderSystem() {
+    const st = (window.DataService && window.DataService.status) ? window.DataService.status() : {};
+    const H = window.NexusHistory;
+    const recs = H ? H.getAll() : [];
+    const sm = H ? H.summary() : { total: 0, compras: 0, ventas: 0, neutrales: 0, hit1: null, hit7: null, hit30: null, avgRet: null, bestAsset: null, worstAsset: null };
+    const evaluadas = recs.filter((r) => r.evals.d1 || r.evals.d7 || r.evals.d30).length;
+    const pendientes = recs.length - evaluadas;
+    let bytes = 0; try { bytes = (localStorage.getItem("nexus.history.v1") || "").length; } catch (e) {}
+    const sizeTxt = bytes >= 1024 ? (bytes / 1024).toFixed(1) + " KB" : bytes + " B";
+    const first = recs.length ? new Date(Math.min.apply(null, recs.map((r) => r.ts))).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+    const host = location.hostname;
+    const onPages = /github\.io$/i.test(host);
+    const isLocal = host === "localhost" || host === "127.0.0.1" || location.protocol === "file:";
+
+    const pill = (s, txt) => `<span class="badge ${s === "ok" ? "sent-positivo" : s === "bad" ? "sent-negativo" : "sent-neutral"}">${txt}</span>`;
+    const cgState = st.coingecko === true ? "ok" : st.coingecko === false ? "bad" : "neu";
+    const fngState = st.fng === true ? "ok" : st.fng === false ? "bad" : "neu";
+    const engState = (st.engineSignals || 0) > 0 ? "ok" : "neu";
+    const health = (st.source === "live" && st.coingecko) ? ["ok", "Operativo"] : st.source === "cache" ? ["neu", "Datos en caché"] : st.source === "fallback" ? ["bad", "Sin conexión (demo)"] : ["neu", "Inicializando…"];
+
+    const pct = (v) => (v == null ? "—" : Math.round(v) + "%");
+    const card = (label, value, sub) => `<div class="card stat-card"><div class="stat-label">${label}</div><div class="stat-value" style="font-size:20px">${value}</div>${sub ? `<div class="stat-sub faint">${sub}</div>` : ""}</div>`;
+    const srow = (label, s, txt, sub) => `<div class="set-row"><div class="set-text"><strong>${label}</strong>${sub ? `<small>${sub}</small>` : ""}</div>${pill(s, txt)}</div>`;
+    const TRIG = { inicial: "inicio", "señal": "cambio", "convicción": "convicción" };
+    const ret = (e) => e ? `<span class="${e.ret >= 0 ? "pos" : "neg"}">${e.ret >= 0 ? "+" : ""}${e.ret.toFixed(2)}%</span>` : `<span class="faint">—</span>`;
+    const logRows = [...recs].sort((a, b) => b.ts - a.ts).slice(0, 10).map((r) => `<tr data-record="${r.id}" title="Ver trazabilidad">
+      <td>${new Date(r.ts).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" })}</td>
+      <td>${r.symbol} <span class="faint" style="font-size:10px">${TRIG[r.trigger] || ""}</span></td>
+      <td>${signalBadge(r.signal, true)}</td>
+      <td class="mono">${fmtScore(r.score)}</td>
+      <td>${ret(r.evals.d1)}</td>
+      <td>${ret(r.evals.d7)}</td>
+      <td>${ret(r.evals.d30)}</td>
+    </tr>`).join("");
+
+    return `
+      <div class="page-head"><h1>Estado del Sistema</h1><p>Visibilidad completa del motor, las fuentes de datos y el historial — sin abrir DevTools.</p></div>
+
+      <div class="grid cols-2">
+        <div class="card"><div class="section-head"><h2>Salud general</h2></div>
+          <div style="font-size:18px;font-weight:700">${pill(health[0], health[1])}</div>
+          <p class="faint" style="font-size:12px;margin:10px 0 0;line-height:1.5">Última actualización de datos: <strong style="color:var(--text)">${ago(st.lastUpdate)}</strong>${st.error ? `<br>Último error: ${st.error}` : ""}</p>
+        </div>
+        <div class="card"><div class="section-head"><h2>Estado de servicios</h2></div>
+          ${srow("CoinGecko", cgState, cgState === "ok" ? "Operativo" : cgState === "bad" ? "Caído" : "En caché", "Precios, mercado e históricos")}
+          ${srow("Fear &amp; Greed", fngState, fngState === "ok" ? "Operativo" : fngState === "bad" ? "Caído" : "En caché", "Alternative.me")}
+          ${srow("Motor de análisis", engState, engState === "ok" ? `Activo · ${st.engineSignals} señales` : "Sin señales", "RSI / MACD / EMA → score")}
+          ${srow("GitHub Pages", onPages ? "ok" : "neu", onPages ? "Publicado" : isLocal ? "Local" : host, onPages ? host : "origen actual")}
+        </div>
+      </div>
+
+      <div class="section-head" style="margin-top:26px"><h2>Centro de estadísticas</h2></div>
+      <div class="grid cols-4">
+        ${card("Total señales", recs.length)}
+        ${card("Pendientes", `<span class="muted">${pendientes}</span>`)}
+        ${card("Evaluadas", `<span class="pos">${evaluadas}</span>`)}
+        ${card("Tamaño historial", sizeTxt)}
+        ${card("Acierto 1d", pct(sm.hit1))}
+        ${card("Acierto 7d", pct(sm.hit7))}
+        ${card("Acierto 30d", pct(sm.hit30))}
+        ${card("Retorno prom.", sm.avgRet == null ? "—" : `<span class="${sm.avgRet >= 0 ? "pos" : "neg"}">${sm.avgRet >= 0 ? "+" : ""}${sm.avgRet.toFixed(2)}%</span>`, "por señal (7d)")}
+        ${card("Mejor activo", sm.bestAsset ? sm.bestAsset.symbol : "—", sm.bestAsset ? `${sm.bestAsset.ret >= 0 ? "+" : ""}${sm.bestAsset.ret.toFixed(1)}% (7d)` : "")}
+        ${card("Peor activo", sm.worstAsset ? sm.worstAsset.symbol : "—", sm.worstAsset ? `${sm.worstAsset.ret >= 0 ? "+" : ""}${sm.worstAsset.ret.toFixed(1)}% (7d)` : "")}
+        ${card("Primera señal", first)}
+        ${card("Persistencia", H && H.available ? "OK" : "—", "localStorage")}
+      </div>
+
+      <div class="section-head" style="margin-top:26px"><h2>Últimas señales</h2><span class="link" data-view-link="performance">Ver historial completo →</span></div>
+      <div class="table-wrap"><table class="ftable" style="min-width:560px"><thead><tr><th>Fecha</th><th>Activo</th><th>Señal</th><th>Score</th><th>1d</th><th>7d</th><th>30d</th></tr></thead><tbody>${logRows || `<tr><td colspan="7" class="faint" style="padding:18px;text-align:center">Aún no hay señales registradas.</td></tr>`}</tbody></table></div>
+
+      <div class="filter-row" style="margin-top:18px">
+        <button class="filter-btn" data-action="recalc">↻ Recalcular estadísticas</button>
+        <button class="filter-btn" data-action="hist-export">Exportar historial</button>
+        <label class="filter-btn" style="cursor:pointer">Importar historial<input type="file" accept="application/json" data-action="hist-import" style="display:none"></label>
+        <button class="filter-btn" data-action="backup">Descargar respaldo completo</button>
+      </div>
+      <p class="faint" style="font-size:12px;margin-top:10px;line-height:1.5">El respaldo completo incluye historial + ajustes. Importar fusiona sin duplicar. Todo se guarda en este navegador (localStorage).</p>`;
+  }
+
   /* =====================================================================
      ROUTER + EVENTOS
      ===================================================================== */
   const VIEWS = {
     dashboard: renderDashboard, market: renderMarket, analysis: renderAnalysis,
     profile: () => renderProfile(state.coin), alerts: renderAlerts, news: renderNews,
-    performance: renderPerformance, settings: renderSettings,
+    performance: renderPerformance, system: renderSystem, settings: renderSettings,
   };
 
   function setView(view, coinSym) {
@@ -782,13 +878,13 @@
       updateAlertBadge(); if (state.view === "alerts") rerender();
     } else if (a === "perf") {
       state.perfHorizon = el.dataset.h; rerender();
+    } else if (a === "recalc") {
+      refresh(true).then(() => rerender());
     } else if (a === "hist-export") {
-      const blob = new Blob([window.NexusHistory.exportJSON()], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url; link.download = "nexus-historial.json";
-      document.body.appendChild(link); link.click(); link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      downloadJSON(window.NexusHistory.exportJSON(), "nexus-historial.json");
+    } else if (a === "backup") {
+      let settings = null; try { settings = JSON.parse(localStorage.getItem("nexus.settings") || "null"); } catch (e) {}
+      downloadJSON(JSON.stringify({ v: 1, exportedAt: Date.now(), history: window.NexusHistory.getAll(), settings }, null, 2), "nexus-respaldo.json");
     } else if (a === "hist-clear") {
       if (window.confirm("¿Borrar todo el historial de señales? Esta acción no se puede deshacer.")) {
         window.NexusHistory.clear(); rerender();

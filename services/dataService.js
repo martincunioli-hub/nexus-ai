@@ -12,6 +12,13 @@ window.DataService = (function () {
   const ids = CONF.coins.map((c) => c.id);
   const SNAP = "snapshot.v3"; // v3: el shape incluye análisis técnico + desglose de factores
 
+  // Estado del sistema (observabilidad, lo lee la vista "Sistema"). Sin lógica de negocio.
+  let _status = { source: null, coingecko: null, global: null, fng: null, engineSignals: null, error: null };
+  function status() {
+    const age = window.NexusCache.age(SNAP);
+    return Object.assign({}, _status, { lastUpdate: isFinite(age) ? Date.now() - age : null });
+  }
+
   /* --- utilidades --- */
   const r1 = (n) => Math.round(n * 10) / 10;
   const r2 = (n) => Math.round(n * 100) / 100;
@@ -149,6 +156,8 @@ window.DataService = (function () {
       const snap = C.get(SNAP, CONF.cache.snapshot);
       if (snap) {
         if (window.NexusHistory) { try { window.NexusHistory.record(snap.coins); } catch (e) {} }
+        _status.source = "cache";
+        _status.engineSignals = (snap.coins || []).filter((c) => c.signal != null).length;
         return { data: snap, source: "cache" };
       }
     }
@@ -172,15 +181,20 @@ window.DataService = (function () {
           window.NexusHistory.evaluate(seriesBySym);
         } catch (e) { console.warn("[NEXUS] historial:", e.message); }
       }
+      _status = { source: "live", coingecko: true, global: !!global, fng: !!fng, engineSignals: data.coins.filter((c) => c.signal != null).length, error: null };
       C.set(SNAP, data);
       return { data, source: "live" };
     } catch (e) {
       console.warn("[NEXUS] Falló la carga en vivo:", e.message);
       const stale = C.get(SNAP, Infinity); // último snapshot, aunque haya expirado
-      if (stale) return { data: stale, source: "cache" };
+      if (stale) {
+        _status = { source: "cache", coingecko: false, global: false, fng: false, engineSignals: (stale.coins || []).filter((c) => c.signal != null).length, error: e.message };
+        return { data: stale, source: "cache" };
+      }
+      _status = { source: "fallback", coingecko: false, global: false, fng: false, engineSignals: 0, error: e.message };
       return { data: window.NEXUS_FALLBACK, source: "fallback" };
     }
   }
 
-  return { load };
+  return { load, status };
 })();
