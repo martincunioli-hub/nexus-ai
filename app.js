@@ -17,7 +17,7 @@
     sort: { key: "marketCap", dir: "desc" },
     alertFilter: "todas",
     perfHorizon: "d7",
-    radar: { coins: null, ts: 0, loading: false, error: null, filter: "todas" },
+    radar: { coins: null, ts: 0, loading: false, error: null, filter: "todas", tableFilter: "top25", tableSort: { key: "score", dir: "desc" } },
     theme: "dark",
     fav: ["BTC", "ETH", "SOL"],
     prefs: { rsi: true, ema: true, vol: true, signal: true },
@@ -636,7 +636,54 @@
       ${fbtns}
       <div class="table-wrap"><table class="ftable" style="min-width:720px"><thead><tr><th>#</th><th>Activo</th><th>Precio</th><th>Score</th><th>Conf.</th><th>Riesgo</th><th>Prob.</th><th>Pot. 7d</th><th>Pot. 30d</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 
-    return head + disclaimer + posCard + discCard + tableCard;
+    // ---- Diagnóstico del escaneo ----
+    const st = (window.NexusRadar.stats && window.NexusRadar.stats()) || { downloaded: 0, excluded: 0, analyzed: all.length, ts: r.ts };
+    const diagCard = `<div class="card" style="margin:18px 0 14px"><div class="section-head"><h2>Diagnóstico del escaneo</h2><span class="faint" style="font-size:12px">Universo analizado por el Radar</span></div>
+      <div class="grid cols-4">
+        <div class="metric"><div class="m-label">Activos descargados</div><div class="m-val">${st.downloaded || "—"}</div></div>
+        <div class="metric"><div class="m-label">Activos excluidos</div><div class="m-val">${st.excluded || 0}</div></div>
+        <div class="metric"><div class="m-label">Activos analizados</div><div class="m-val">${st.analyzed || all.length}</div></div>
+        <div class="metric"><div class="m-label">Última actualización</div><div class="m-val" style="font-size:14px">${ago(st.ts || r.ts)}</div></div>
+      </div></div>`;
+
+    // ---- Ranking completo del mercado (vista secundaria de exploración) ----
+    const riskRank = { bajo: 0, medio: 1, alto: 2 };
+    const TF = [["top10", "Top 10"], ["top25", "Top 25"], ["top50", "Top 50"], ["top100", "Top 100"], ["bajo", "Bajo riesgo"], ["confianza", "Mayor confianza"]];
+    const tf = r.tableFilter || "top25";
+    const tfbtns = `<div class="filter-row">${TF.map(([k, l]) => `<button class="filter-btn ${tf === k ? "active" : ""}" data-action="radar-table-filter" data-f="${k}">${l}</button>`).join("")}</div>`;
+
+    let full = all.slice();
+    if (tf === "bajo") full = full.filter((c) => c.risk === "bajo");
+
+    // Orden por columna (siempre aplicable; el filtro "Mayor confianza" preconfigura el orden)
+    const ts = r.tableSort || { key: "score", dir: "desc" };
+    const keyVal = { score: (c) => c.score, confianza: (c) => c.confidence, probabilidad: (c) => prob(c), precio: (c) => c.price, riesgo: (c) => riskRank[c.risk] };
+    const kf = keyVal[ts.key] || keyVal.score;
+    full = [...full].sort((a, b) => (kf(b) - kf(a)) * (ts.dir === "asc" ? -1 : 1));
+
+    // Límite por Top N
+    const lim = { top10: 10, top25: 25, top50: 50, top100: 100 }[tf];
+    if (lim) full = full.slice(0, lim);
+
+    const arrow = (k) => (ts.key === k ? (ts.dir === "asc" ? " ▲" : " ▼") : "");
+    const sh = (k, label) => `<th class="sortable" data-action="radar-table-sort" data-k="${k}" style="cursor:pointer">${label}${arrow(k)}</th>`;
+    const fullRows = full.map((c, i) => `<tr data-coin="${c.symbol}">
+      <td class="mono">${c.monitored ? "★ " : ""}#${i + 1}</td>
+      <td>${coinCell(c)}</td>
+      <td class="mono">${money(c.price)}</td>
+      <td class="mono ${c.score >= 0 ? "pos" : "neg"}">${fmtScore(c.score)}</td>
+      <td class="mono">${c.confidence}%</td>
+      <td>${riskBadge(c.risk)}</td>
+      <td class="mono">${prob(c)}%</td>
+    </tr>`).join("");
+    const fullCard = `<div class="section-head" style="margin-top:4px"><h2>Ranking completo del mercado</h2><span class="faint" style="font-size:12px">${full.length} de ${all.length} activos · vista de exploración</span></div>
+      ${tfbtns}
+      <div class="table-wrap"><table class="ftable" style="min-width:640px"><thead><tr>
+        <th>#</th><th>Activo</th>${sh("precio", "Precio")}${sh("score", "Score")}${sh("confianza", "Confianza")}${sh("riesgo", "Riesgo")}${sh("probabilidad", "Prob. alcista")}
+      </tr></thead><tbody>${fullRows}</tbody></table></div>
+      <p class="faint" style="font-size:11.5px;margin-top:8px">★ = activo que ya monitoreás. Tabla informativa: no genera señales ni recomendaciones nuevas.</p>`;
+
+    return head + disclaimer + posCard + discCard + tableCard + diagCard + fullCard;
   }
   function radarNotifs() {
     if (!state.radar.coins || !OPP) return [];
@@ -1153,6 +1200,14 @@
       openOppAudit(el.dataset.sym);
     } else if (a === "radar-filter") {
       state.radar.filter = el.dataset.f; rerender();
+    } else if (a === "radar-table-filter") {
+      state.radar.tableFilter = el.dataset.f;
+      if (el.dataset.f === "confianza") state.radar.tableSort = { key: "confianza", dir: "desc" };
+      rerender();
+    } else if (a === "radar-table-sort") {
+      const k = el.dataset.k, cur = state.radar.tableSort || { key: "score", dir: "desc" };
+      state.radar.tableSort = { key: k, dir: cur.key === k && cur.dir === "desc" ? "asc" : "desc" };
+      rerender();
     } else if (a === "perf") {
       state.perfHorizon = el.dataset.h; rerender();
     } else if (a === "recalc") {

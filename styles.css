@@ -291,6 +291,8 @@ table.market thead th {
 }
 table.market thead th:first-child, table.market tbody td:first-child { text-align: left; }
 table.market thead th.sortable:hover { color: var(--text); }
+.ftable thead th.sortable { user-select: none; }
+.ftable thead th.sortable:hover { color: var(--text); }
 table.market thead th .arrow { opacity: .5; font-size: 10px; }
 table.market tbody td { padding: 13px 16px; text-align: right; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
 table.market tbody tr { cursor: pointer; transition: background .12s; }

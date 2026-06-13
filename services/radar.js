@@ -61,10 +61,16 @@ window.NexusRadar = (function () {
     return data;
   }
 
+  let _stats = { downloaded: 0, excluded: 0, analyzed: 0, ts: 0 };
+
   async function scan() {
     const top = await fetchTop();
-    return (top || []).filter((m) => !excluded(m)).map(analyzeLight);
+    const list = top || [];
+    const kept = list.filter((m) => !excluded(m));
+    const coins = kept.map(analyzeLight);
+    _stats = { downloaded: list.length, excluded: list.length - kept.length, analyzed: coins.length, ts: Date.now() };
+    return coins;
   }
 
-  return { scan, isMonitored: (s) => monitored.has(s) };
+  return { scan, stats: () => _stats, isMonitored: (s) => monitored.has(s) };
 })();
