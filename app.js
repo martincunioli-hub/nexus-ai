@@ -359,7 +359,7 @@
         ? `<div class="signal-strip">${featured.map(tile).join("")}</div>`
         : `<div class="card"><p class="muted" style="margin:0;font-size:13px;line-height:1.55">Las señales IA (Compra / Neutral / Venta) se generan en el <strong>Paso 2</strong> a partir de RSI, MACD y EMAs. Los datos de mercado de arriba ya son reales (CoinGecko).</p></div>`}
 
-      <div class="section-head" style="margin-top:26px"><h2>Top oportunidades</h2><span class="faint" style="font-size:12px">por score técnico</span></div>
+      <div class="section-head" style="margin-top:26px"><h2>Top oportunidades</h2><span class="link" data-view-link="opportunities">Ver Oportunidades →</span></div>
       <div class="card" style="padding:4px 16px">${(() => {
         const opps = r.oport.filter(hasFullAnalysis).slice(0, 5);
         return opps.length ? opps.map(oppRow).join("") : `<p class="muted" style="padding:16px 6px;font-size:13px">Sin oportunidades con datos suficientes en este momento.</p>`;
@@ -441,6 +441,92 @@
   }
 
   /* =====================================================================
+     PANTALLA · OPORTUNIDADES (capa de derivación; no toca el motor)
+     ===================================================================== */
+  const OPP = window.NexusOpportunities;
+  const OPP_BADGE = { segura: ["signal-buy", "🟢 Segura"], moderada: ["signal-neutral", "🟡 Moderada"], riesgosa: ["signal-sell", "🔴 Riesgosa"] };
+  const oppBadge = (lv) => { const m = OPP_BADGE[lv] || OPP_BADGE.riesgosa; return `<span class="badge ${m[0]}">${m[1]}</span>`; };
+  const pctChg = (target, price) => { const d = (target / price - 1) * 100; return `<span class="${d >= 0 ? "pos" : "neg"}">${d >= 0 ? "+" : ""}${d.toFixed(1)}%</span>`; };
+
+  function oppFactors(c) {
+    if (!c.factors || !c.factors.length) return "";
+    return `<ul class="reasons">${c.factors.map((f) => {
+      const cls = f.sub > 0 ? "r-pos" : f.sub < 0 ? "r-neg" : "r-neu";
+      const mark = f.sub > 0 ? "✓" : f.sub < 0 ? "✗" : "–";
+      return `<li><span class="r-pip ${cls}"></span><span><strong>${mark} ${f.label}</strong> <span class="faint">${f.value} · ${f.contrib > 0 ? "+" : ""}${f.contrib}</span></span></li>`;
+    }).join("")}</ul>`;
+  }
+  function scenarioTable(c) {
+    const t = OPP.targets(c);
+    const row = (lbl, h) => `<tr><td>${lbl}</td>
+      <td class="mono">${money(h.conservador)} ${pctChg(h.conservador, c.price)}</td>
+      <td class="mono">${money(h.base)} ${pctChg(h.base, c.price)}</td>
+      <td class="mono">${money(h.optimista)} ${pctChg(h.optimista, c.price)}</td></tr>`;
+    return `<table class="ftable"><thead><tr><th>Horizonte</th><th>Conservador</th><th>Base</th><th>Optimista</th></tr></thead><tbody>${row("7 días", t.d7)}${row("30 días", t.d30)}</tbody></table>`;
+  }
+  function oppCard(c, rankN) {
+    const lv = OPP.level(c), prob = OPP.probability(c);
+    return `<div class="card opp-card" data-coin="${c.symbol}">
+      <div class="opp-card-head">
+        ${rankN ? `<span class="opp-rank">#${rankN}</span>` : ""}${coinCell(c)}
+        <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">${oppBadge(lv)}<button class="filter-btn" data-action="opp-audit" data-sym="${c.symbol}" style="padding:5px 10px">¿Por qué?</button></span>
+      </div>
+      <div class="analysis-metrics" style="margin:12px 0">
+        <div class="metric"><div class="m-label">Precio</div><div class="m-val" style="font-size:15px">${money(c.price)}</div></div>
+        <div class="metric"><div class="m-label">Score</div><div class="m-val ${c.score >= 0 ? "pos" : "neg"}">${fmtScore(c.score)}</div></div>
+        <div class="metric"><div class="m-label">Confianza</div><div class="m-val">${c.confidence}%</div></div>
+        <div class="metric"><div class="m-label">Riesgo</div><div class="m-val" style="font-size:14px">${riskBadge(c.risk)}</div></div>
+        <div class="metric"><div class="m-label">Prob. alcista</div><div class="m-val">${prob}%</div></div>
+      </div>
+      <div class="section-sub">Objetivos de precio · 7 d y 30 d (volatilidad + momentum)</div>
+      ${scenarioTable(c)}
+      <div class="section-sub">Motivos (✓ ayudan · ✗ perjudican)</div>
+      ${oppFactors(c)}
+      <p class="muted" style="font-size:13px;line-height:1.55;margin:12px 0 0">${OPP.recommendation(c)}</p>
+    </div>`;
+  }
+  function renderOpportunities() {
+    const head = `<div class="page-head"><h1>Oportunidades</h1><p>Las mejores configuraciones detectadas por el motor, clasificadas por seguridad. Reutiliza el análisis existente — no cambia señales ni pesos.</p></div>`;
+    const disclaimer = `<div class="card" style="margin-bottom:16px;border-color:var(--amber)"><p class="muted" style="margin:0;font-size:12.5px;line-height:1.5">⚠ Estimación basada en datos históricos y análisis técnico. <strong>No constituye asesoramiento financiero.</strong> La "probabilidad alcista" y los objetivos de precio son estimaciones derivadas de volatilidad y momentum, no predicciones.</p></div>`;
+    const ranked = OPP ? OPP.rank(DATA.coins) : [];
+    if (!ranked.length) return head + disclaimer + `<div class="card"><p class="muted" style="margin:0">No hay activos con análisis técnico suficiente en este momento.</p></div>`;
+    const legend = `<div class="card" style="margin-bottom:16px"><div class="section-head"><h2>Cómo se clasifica</h2></div>
+      <ul class="reasons" style="font-size:12.5px">
+        <li><span class="r-pip r-pos"></span><span><strong>🟢 Segura</strong> — Compra (score &gt; 30), confianza ≥ 60, riesgo ≠ alto y ≥ 3 confirmaciones (RSI 45–70, momentum+, EMA alcista, MACD+).</span></li>
+        <li><span class="r-pip r-neu"></span><span><strong>🟡 Moderada</strong> — sesgo positivo (score ≥ 0), confianza ≥ 45 y ≥ 2 confirmaciones.</span></li>
+        <li><span class="r-pip r-neg"></span><span><strong>🔴 Riesgosa</strong> — score negativo, riesgo alto, baja confianza o poca confirmación.</span></li>
+      </ul></div>`;
+    const top = ranked.slice(0, 5), rest = ranked.slice(5);
+    const topGrid = `<div class="section-head" style="margin-top:4px"><h2>Top 5 oportunidades</h2><span class="faint" style="font-size:12px">por score · confianza · riesgo</span></div><div class="grid cols-2">${top.map((c, i) => oppCard(c, i + 1)).join("")}</div>`;
+    const restGrid = rest.length ? `<div class="section-head" style="margin-top:26px"><h2>Resto de activos</h2></div><div class="grid cols-2">${rest.map((c) => oppCard(c, 0)).join("")}</div>` : "";
+    return head + disclaimer + legend + topGrid + restGrid;
+  }
+
+  function coinAuditModalHTML(c) {
+    const lv = OPP.level(c), prob = OPP.probability(c);
+    return `<div class="modal-backdrop"><div class="modal-card">
+      <span class="modal-close" title="Cerrar">✕</span>
+      <div class="coin" style="margin-bottom:8px">${coinLogo(c)}<span><span class="coin-name">${c.name}</span> <span class="coin-sym">${c.symbol}</span></span></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">${oppBadge(lv)}${signalBadge(c.signal)}${riskBadge(c.risk)}<span class="muted" style="font-size:13px">Score <strong class="${c.score >= 0 ? "pos" : "neg"}">${fmtScore(c.score)}</strong></span><span class="muted" style="font-size:13px">Confianza <strong style="color:var(--text)">${c.confidence}%</strong></span><span class="muted" style="font-size:13px">Prob. alcista <strong style="color:var(--text)">${prob}%</strong></span></div>
+      <div class="section-sub">Indicadores actuales</div>
+      ${indChips(c)}
+      <div class="section-sub">Desglose del score (peso × indicador)</div>
+      ${c.factors && c.factors.length ? factorTable(c.factors, c.score) : `<p class="faint" style="font-size:12px">Sin desglose disponible.</p>`}
+      <div class="section-sub">Objetivos de precio</div>
+      ${scenarioTable(c)}
+      ${c.reasons && c.reasons.length ? `<div class="section-sub">Motivos</div>${reasonsList(c.reasons, 4)}` : ""}
+      <p class="faint" style="font-size:11.5px;margin-top:12px;line-height:1.5">Estimación basada en datos históricos y análisis técnico. No constituye asesoramiento financiero.</p>
+    </div></div>`;
+  }
+  function openOppAudit(sym) {
+    const c = DATA.coins.find((x) => x.symbol === sym);
+    if (!c) return;
+    let host = document.getElementById("nexusModal");
+    if (!host) { host = document.createElement("div"); host.id = "nexusModal"; document.body.appendChild(host); }
+    host.innerHTML = coinAuditModalHTML(c);
+  }
+
+  /* =====================================================================
      PANTALLA · ANÁLISIS IA
      ===================================================================== */
   function renderAnalysis() {
@@ -461,7 +547,7 @@
       ${c.factors && c.factors.length ? `<div class="section-sub">Desglose auditable del score</div>${factorTable(c.factors, c.score)}` : ""}
     </div>`;
     return `
-      <div class="page-head"><h1>Análisis IA</h1><p>Motor determinista y explicable: combina RSI, MACD, EMA 20/50/200, volumen y tendencia. Cada señal expone sus motivos.</p></div>
+      <div class="page-head"><h1>Análisis IA</h1><p>Motor determinista y explicable: combina RSI, MACD, EMA 20/50/200, volumen y tendencia. Cada señal expone sus motivos. <span class="link" data-view-link="opportunities">Ver Oportunidades →</span></p></div>
       ${hasSignals ? "" : `<div class="card" style="margin-bottom:16px"><p class="muted" style="margin:0;font-size:13px;line-height:1.55"><strong>Paso 2 pendiente.</strong> El análisis técnico (RSI, MACD, EMA 20/50/200) aún no está activo: por eso señal, confianza, riesgo y motivos figuran como “—”. Los datos de mercado ya son reales (CoinGecko).</p></div>`}
       <div class="analysis-grid">${cs.map(card).join("")}</div>`;
   }
@@ -494,7 +580,7 @@
             <div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:20px;font-weight:700">${c.name}</span><span class="coin-sym">${c.symbol} · #${c.rank}</span><span style="font-size:18px">${favStar(c.symbol)}</span></div>
             <div style="display:flex;align-items:baseline;gap:12px;margin-top:2px"><span class="price">${money(c.price)}</span><span style="font-size:14px">${chg(c.change24h)}</span></div>
           </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">${signalBadge(c.signal)}${riskBadge(c.risk)}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${signalBadge(c.signal)}${riskBadge(c.risk)}<span class="link" data-view-link="opportunities">Oportunidad →</span></div>
         </div>
       </div>
 
@@ -899,8 +985,8 @@
      ROUTER + EVENTOS
      ===================================================================== */
   const VIEWS = {
-    dashboard: renderDashboard, market: renderMarket, watchlist: renderWatchlist, analysis: renderAnalysis,
-    profile: () => renderProfile(state.coin), alerts: renderAlerts, news: renderNews,
+    dashboard: renderDashboard, market: renderMarket, watchlist: renderWatchlist, opportunities: renderOpportunities,
+    analysis: renderAnalysis, profile: () => renderProfile(state.coin), alerts: renderAlerts, news: renderNews,
     performance: renderPerformance, system: renderSystem, settings: renderSettings,
   };
 
@@ -943,6 +1029,8 @@
     } else if (a === "thresh") {
       state.thresholds[el.dataset.key] = parseFloat(el.value) || 0; saveSettings();
       updateAlertBadge(); if (state.view === "alerts") rerender();
+    } else if (a === "opp-audit") {
+      openOppAudit(el.dataset.sym);
     } else if (a === "perf") {
       state.perfHorizon = el.dataset.h; rerender();
     } else if (a === "recalc") {

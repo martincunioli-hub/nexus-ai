@@ -496,6 +496,11 @@ table.market tbody tr:last-child td { border-bottom: 0; }
 .fav-star:hover { color: var(--amber); }
 .fav-star.on { color: var(--amber); }
 
+/* Oportunidades */
+.opp-card-head { display: flex; align-items: center; gap: 10px; }
+.opp-rank { background: var(--primary); color: #fff; font-weight: 700; font-size: 12px; min-width: 28px;
+  height: 24px; border-radius: 7px; display: grid; place-items: center; padding: 0 6px; flex: none; }
+
 /* Centro de notificaciones */
 .notif { position: relative; }
 #notifBtn { position: relative; }
