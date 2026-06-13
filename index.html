@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NEXUS AI · Análisis inteligente de cripto</title>
+  <meta name="description" content="Plataforma personal de análisis inteligente de criptomonedas." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 2 4 7v10l8 5 8-5V7z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 9.5 12 12l4-2.5M12 12v5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <div class="brand-text">
+          <strong>NEXUS<span class="brand-ai">AI</span></strong>
+          <small>Análisis de cripto</small>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="Navegación principal">
+        <p class="nav-label">General</p>
+        <a class="nav-item" data-view="dashboard" href="#dashboard">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M4 13h6V4H4zM14 20h6V4h-6zM4 20h6v-4H4z"/></svg>
+          <span>Dashboard</span>
+        </a>
+        <a class="nav-item" data-view="market" href="#market">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M3 3v18h18M7 14l3-4 3 3 5-7"/></svg>
+          <span>Mercado</span>
+        </a>
+        <a class="nav-item" data-view="analysis" href="#analysis">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M12 3a9 9 0 1 0 9 9M12 3v9l6 3"/><circle cx="12" cy="12" r="1.6"/></svg>
+          <span>Análisis IA</span>
+        </a>
+        <a class="nav-item" data-view="profile" href="#profile">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M3 17l5-6 4 3 5-8 4 6M3 21h18"/></svg>
+          <span>Perfil de moneda</span>
+        </a>
+
+        <p class="nav-label">Monitoreo</p>
+        <a class="nav-item" data-view="alerts" href="#alerts">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+          <span>Alertas</span>
+          <span class="nav-badge" id="navAlertCount">0</span>
+        </a>
+        <a class="nav-item" data-view="news" href="#news">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M4 5h16v14H4zM8 9h8M8 13h8M8 17h5"/></svg>
+          <span>Noticias</span>
+        </a>
+
+        <p class="nav-label">Ajustes</p>
+        <a class="nav-item" data-view="settings" href="#settings">
+          <svg viewBox="0 0 24 24" class="ico"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.4 2h-4l-.4 2.4a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L3.5 11a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.4 2.4h4l.4-2.4a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6a7 7 0 0 0 .1-1z"/></svg>
+          <span>Configuración</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="disclaimer">
+          Herramienta personal de apoyo a la decisión. No es asesoría financiera.
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <div class="main">
+      <header class="topbar">
+        <button class="icon-btn only-mobile" id="menuToggle" aria-label="Abrir menú">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        </button>
+
+        <div class="search">
+          <svg viewBox="0 0 24 24" class="ico"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input id="globalSearch" type="text" placeholder="Buscar activo (BTC, ETH, SOL…)" autocomplete="off" />
+        </div>
+
+        <div class="topbar-right">
+          <span class="status-live" title="Datos de ejemplo">
+            <span class="dot"></span> Datos demo
+          </span>
+          <span class="updated" id="lastUpdated">—</span>
+          <button class="icon-btn" id="themeToggle" aria-label="Cambiar tema" title="Tema claro/oscuro">
+            <svg viewBox="0 0 24 24" class="ico ico-moon"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+            <svg viewBox="0 0 24 24" class="ico ico-sun"><circle cx="12" cy="12" r="4.5"/><path d="M12 1.5v3M12 19.5v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1.5 12h3M19.5 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="view" id="view" tabindex="-1"><!-- render dinámico --></main>
+    </div>
+
+    <div class="scrim" id="scrim" hidden></div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

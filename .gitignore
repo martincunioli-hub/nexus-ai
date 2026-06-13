@@ -1,0 +1,24 @@
+# Dependencias (fases futuras con Node.js / Next.js)
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# Variables de entorno (claves de API, conexión a BD)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
