@@ -17,6 +17,7 @@
     sort: { key: "marketCap", dir: "desc" },
     alertFilter: "todas",
     perfHorizon: "d7",
+    radar: { coins: null, ts: 0, loading: false, error: null, filter: "todas" },
     theme: "dark",
     fav: ["BTC", "ETH", "SOL"],
     prefs: { rsi: true, ema: true, vol: true, signal: true },
@@ -225,8 +226,9 @@
   const NOTIF_KEY = "notifs.seen";
   const notifKey = (a) => a.type + ":" + a.sym;                 // identidad estable (sin el valor, evita spam)
   const notifSeen = () => (window.NexusCache && window.NexusCache.get(NOTIF_KEY, Infinity)) || [];
-  const currentNotifs = () => computeAlerts().map((a) => Object.assign({}, a, { key: notifKey(a) }));
+  const currentNotifs = () => computeAlerts().map((a) => Object.assign({}, a, { key: notifKey(a) })).concat(radarNotifs());
   function notifMeta(a) {
+    if (a.type === "radar_opportunity") return { label: "Nueva oportunidad (Radar)", sev: "info" };
     if (a.type === "signal_change" && /→\s*Compra/.test(a.message)) return { label: "Nueva oportunidad", sev: "info" };
     const L = { signal_change: "Cambio de señal", rsi_low: "RSI extremo", rsi_high: "RSI extremo", vol_spike: "Volumen anormal", ema_cross: "Cruce EMA" };
     return { label: L[a.type] || "Alerta", sev: a.severity };
@@ -249,10 +251,11 @@
     const { cur, seen } = refreshNotifs();
     if (!cur.length) return `<div class="notif-head">Notificaciones</div><div class="notif-empty">Sin notificaciones activas.</div>`;
     const items = cur.map((n) => {
-      const m = notifMeta(n), c = coinBy(n.sym), isNew = seen.indexOf(n.key) === -1;
-      return `<div class="notif-item ${isNew ? "nuevo" : ""}" data-coin="${n.sym}">
+      const m = notifMeta(n), isNew = seen.indexOf(n.key) === -1;
+      const navAttr = n.type === "radar_opportunity" ? `data-view-link="radar"` : `data-coin="${n.sym}"`;
+      return `<div class="notif-item ${isNew ? "nuevo" : ""}" ${navAttr}>
         <div class="alert-ico ${m.sev}" style="width:30px;height:30px">${alertIcon(n.type)}</div>
-        <div class="notif-body"><div class="notif-msg">${n.message}</div><div class="notif-meta">${c.symbol} · ${m.label} · ${n.time}</div></div>
+        <div class="notif-body"><div class="notif-msg">${n.message}</div><div class="notif-meta">${n.sym} · ${m.label} · ${n.time}</div></div>
       </div>`;
     }).join("");
     return `<div class="notif-head">Notificaciones <span class="faint" style="font-weight:400">${cur.length}</span></div>${items}`;
@@ -554,11 +557,93 @@
     </div></div>`;
   }
   function openOppAudit(sym) {
-    const c = DATA.coins.find((x) => x.symbol === sym);
+    const c = (DATA.coins.find((x) => x.symbol === sym)) || ((state.radar.coins || []).find((x) => x.symbol === sym));
     if (!c) return;
     let host = document.getElementById("nexusModal");
     if (!host) { host = document.createElement("div"); host.id = "nexusModal"; document.body.appendChild(host); }
     host.innerHTML = coinAuditModalHTML(c);
+  }
+
+  /* =====================================================================
+     PANTALLA · RADAR GLOBAL (capa adicional; escaneo async del Top 100)
+     ===================================================================== */
+  function ensureRadar() {
+    const r = state.radar;
+    if (r.loading) return;
+    if (r.coins && Date.now() - r.ts < 10 * 60 * 1000) return; // fresco (10 min)
+    if (!window.NexusRadar) return;
+    r.loading = true; r.error = null;
+    window.NexusRadar.scan().then((coins) => {
+      state.radar.coins = coins; state.radar.ts = Date.now(); state.radar.loading = false;
+      refreshNotifs(); // el Radar puede aportar "nuevas oportunidades"
+      if (state.view === "radar") rerender();
+    }).catch((e) => {
+      state.radar.loading = false; state.radar.error = e.message;
+      if (state.view === "radar") rerender();
+    });
+  }
+  function renderRadar() {
+    const head = `<div class="page-head"><h1>Radar Global</h1><p>Escaneo del Top 100 del mercado para detectar oportunidades fuera de los activos monitoreados. Análisis ligero (7 días) que reutiliza el mismo motor — capa adicional, no cambia el sistema.</p></div>`;
+    const disclaimer = `<div class="card" style="margin-bottom:16px;border-color:var(--amber)"><p class="muted" style="margin:0;font-size:12.5px;line-height:1.5">⚠ Análisis ligero sobre datos de 7 días. Estimación, <strong>no asesoramiento financiero</strong>.</p></div>`;
+    const r = state.radar;
+    ensureRadar();
+    if (!r.coins) {
+      const msg = r.error ? `No se pudo escanear el mercado: ${r.error}` : "Escaneando el Top 100 del mercado…";
+      return head + disclaimer + `<div class="card"><p class="muted" style="margin:0">${msg}</p></div>`;
+    }
+    if (!OPP) return head + disclaimer + `<div class="card"><p class="muted" style="margin:0">Motor de oportunidades no disponible.</p></div>`;
+
+    const all = OPP.rankByRating(r.coins);
+    const prob = (c) => OPP.probability(c), pot = (c) => OPP.potential(c);
+
+    // Posición relativa de las monitoreadas dentro del ranking del mercado
+    const posRows = DATA.coins.map((mc) => {
+      const idx = all.findIndex((c) => c.symbol === mc.symbol);
+      return idx > -1 ? `<span class="chip" data-coin="${mc.symbol}" style="cursor:pointer">${mc.symbol} <strong>#${idx + 1}</strong></span>` : "";
+    }).filter(Boolean).join("");
+    const posCard = `<div class="card" style="margin-bottom:16px"><div class="section-head"><h2>Posición relativa</h2><span class="faint" style="font-size:12px">tus activos vs ${all.length} del mercado</span></div><div class="fav-grid">${posRows || '<span class="faint">—</span>'}</div></div>`;
+
+    // Descubrimientos: no monitoreadas, score alto y momentum positivo
+    const disc = all.filter((c) => !c.monitored && c.score > 20 && (c.change7d || 0) > 0).slice(0, 6);
+    const discCard = `<div class="card briefing" style="margin-bottom:16px"><div class="briefing-head"><span class="briefing-kicker">🚨 Descubrimientos</span><h2>Oportunidades fuera de tu lista</h2></div>
+      ${disc.length ? `<div class="grid cols-3">${disc.map((c) => `<div class="qbuy" data-coin="${c.symbol}">
+        <div class="qbuy-top"><strong>${c.symbol}</strong> <span class="opp-rating">${OPP.rating(c).toFixed(1)}/10</span></div>
+        <div class="faint" style="font-size:12px;margin:4px 0">${c.name}</div>
+        <div style="font-size:12.5px">Prob. <strong>${prob(c)}%</strong> · 30d <strong>${(pot(c).d30.exp >= 0 ? "+" : "") + pot(c).d30.exp.toFixed(1)}%</strong> · conf. ${OPP.conviction(c)}</div>
+      </div>`).join("")}</div>` : `<p class="muted" style="margin:0;font-size:13px">Sin descubrimientos relevantes ahora mismo (el mercado no muestra setups fuertes fuera de tu lista).</p>`}</div>`;
+
+    // Filtros
+    const F = [["todas", "Todas"], ["bajo", "Bajo riesgo"], ["medio", "Riesgo medio"], ["potencial", "Alto potencial"], ["confianza", "Mayor confianza"]];
+    const fbtns = `<div class="filter-row">${F.map(([k, l]) => `<button class="filter-btn ${r.filter === k ? "active" : ""}" data-action="radar-filter" data-f="${k}">${l}</button>`).join("")}</div>`;
+    let list = all.slice();
+    if (r.filter === "bajo") list = list.filter((c) => c.risk === "bajo");
+    else if (r.filter === "medio") list = list.filter((c) => c.risk === "medio");
+    else if (r.filter === "potencial") list = [...list].sort((a, b) => pot(b).d30.exp - pot(a).d30.exp);
+    else if (r.filter === "confianza") list = [...list].sort((a, b) => b.confidence - a.confidence);
+    const top = list.slice(0, 10);
+    const rows = top.map((c, i) => `<tr data-coin="${c.symbol}">
+      <td class="mono">${c.monitored ? "" : "🚨"} #${i + 1}</td>
+      <td>${coinCell(c)}</td>
+      <td class="mono">${money(c.price)}</td>
+      <td class="mono ${c.score >= 0 ? "pos" : "neg"}">${fmtScore(c.score)}</td>
+      <td class="mono">${c.confidence}%</td>
+      <td>${riskBadge(c.risk)}</td>
+      <td class="mono">${prob(c)}%</td>
+      <td>${sPct(pot(c).d7.exp)}</td>
+      <td>${sPct(pot(c).d30.exp)}</td>
+    </tr>`).join("");
+    const tableCard = `<div class="section-head" style="margin-top:4px"><h2>🏆 Top oportunidades del mercado</h2><span class="faint" style="font-size:12px">${all.length} activos analizados</span></div>
+      ${fbtns}
+      <div class="table-wrap"><table class="ftable" style="min-width:720px"><thead><tr><th>#</th><th>Activo</th><th>Precio</th><th>Score</th><th>Conf.</th><th>Riesgo</th><th>Prob.</th><th>Pot. 7d</th><th>Pot. 30d</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+
+    return head + disclaimer + posCard + discCard + tableCard;
+  }
+  function radarNotifs() {
+    if (!state.radar.coins || !OPP) return [];
+    return OPP.rankByRating(state.radar.coins).slice(0, 10).filter((c) => !c.monitored).map((c) => ({
+      type: "radar_opportunity", sym: c.symbol, severity: "info",
+      message: `Radar: ${c.name} (${c.symbol}) entró al Top 10 del mercado`, time: "ahora", key: "radar:" + c.symbol,
+    }));
   }
 
   /* =====================================================================
@@ -1021,7 +1106,7 @@
      ===================================================================== */
   const VIEWS = {
     dashboard: renderDashboard, market: renderMarket, watchlist: renderWatchlist, opportunities: renderOpportunities,
-    analysis: renderAnalysis, profile: () => renderProfile(state.coin), alerts: renderAlerts, news: renderNews,
+    radar: renderRadar, analysis: renderAnalysis, profile: () => renderProfile(state.coin), alerts: renderAlerts, news: renderNews,
     performance: renderPerformance, system: renderSystem, settings: renderSettings,
   };
 
@@ -1066,6 +1151,8 @@
       updateAlertBadge(); if (state.view === "alerts") rerender();
     } else if (a === "opp-audit") {
       openOppAudit(el.dataset.sym);
+    } else if (a === "radar-filter") {
+      state.radar.filter = el.dataset.f; rerender();
     } else if (a === "perf") {
       state.perfHorizon = el.dataset.h; rerender();
     } else if (a === "recalc") {

@@ -43,6 +43,18 @@ window.CoinGecko = (function () {
       return _get("/global");
     },
 
+    // Top N por market cap (Radar Global). Misma API, sin ids fijos.
+    getMarketsTop(perPage, page) {
+      return _get("/coins/markets", {
+        vs_currency: "usd",
+        order: "market_cap_desc",
+        per_page: perPage || 100,
+        page: page || 1,
+        sparkline: true,
+        price_change_percentage: "24h,7d",
+      });
+    },
+
     // Histórico de precios (para el Paso 2 / gráficos de perfil). Granularidad
     // automática: días > 90 → diaria (suficiente para EMA200).
     getMarketChart(id, days) {
