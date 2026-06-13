@@ -75,6 +75,7 @@
     return `<span class="coin-logo" style="background:${c.color};color:${c.fg || "#fff"};${dim}font-size:${fs}px">${c.symbol}</span>`;
   };
   const coinCell = (c) => `<span class="coin">${coinLogo(c)}<span><span class="coin-name">${c.name}</span> <span class="coin-sym">${c.symbol}</span></span></span>`;
+  const favStar = (sym) => `<span class="fav-star ${state.fav.includes(sym) ? "on" : ""}" data-action="fav" data-sym="${sym}" title="Watchlist">${state.fav.includes(sym) ? "★" : "☆"}</span>`;
   const signalBadge = (s, sm) => {
     const st = sm ? ' style="font-size:11px;padding:3px 8px"' : "";
     if (!s) return `<span class="badge sent-neutral"${st}>—</span>`; // pendiente Paso 2
@@ -344,7 +345,7 @@
     });
     const th = (label, k, left) => `<th class="sortable" data-action="sort" data-key="${k}" style="${left ? "text-align:left" : ""}">${label}${key === k ? ` <span class="arrow">${dir === "asc" ? "▲" : "▼"}</span>` : ""}</th>`;
     const rows = sorted.map((c) => `<tr data-coin="${c.symbol}">
-      <td>${coinCell(c)}</td>
+      <td>${favStar(c.symbol)} ${coinCell(c)}</td>
       <td class="mono">${money(c.price)}</td>
       <td>${chg(c.change24h)}</td>
       <td>${chg(c.change7d)}</td>
@@ -371,6 +372,29 @@
         </tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
+  }
+
+  /* =====================================================================
+     PANTALLA · WATCHLIST
+     ===================================================================== */
+  function renderWatchlist() {
+    const favs = state.fav.map((s) => DATA.coins.find((c) => c.symbol === s)).filter(Boolean);
+    const head = `<div class="page-head"><h1>Watchlist</h1><p>Tus activos marcados. Tocá la ⭐ en Mercado o en el perfil de una moneda para agregar o quitar.</p></div>`;
+    if (!favs.length) {
+      return head + `<div class="card"><p class="muted" style="margin:0;line-height:1.6">Todavía no tenés activos en tu watchlist. En <span class="link" data-view-link="market">Mercado</span> tocá la <strong>☆</strong> de los que quieras seguir.</p></div>`;
+    }
+    const rows = favs.map((c) => `<tr data-coin="${c.symbol}">
+      <td>${favStar(c.symbol)} ${coinCell(c)}</td>
+      <td class="mono">${money(c.price)}</td>
+      <td>${chg(c.change24h)}</td>
+      <td>${sparkSVG(c.series["1S"], c.change7d >= 0)}</td>
+      <td>${signalBadge(c.signal, true)}</td>
+      <td class="mono ${c.score >= 0 ? "pos" : "neg"}">${fmtScore(c.score)}</td>
+      <td>${riskBadge(c.risk)}</td>
+    </tr>`).join("");
+    return head + `<div class="table-wrap"><table class="market"><thead><tr>
+      <th style="text-align:left">Activo</th><th>Precio</th><th>24 h</th><th style="cursor:default">7 d</th><th>Señal IA</th><th>Score</th><th>Riesgo</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
   /* =====================================================================
@@ -424,7 +448,7 @@
         <div class="profile-head">
           ${coinLogo(c, 46)}
           <div style="flex:1">
-            <div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:20px;font-weight:700">${c.name}</span><span class="coin-sym">${c.symbol} · #${c.rank}</span></div>
+            <div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:20px;font-weight:700">${c.name}</span><span class="coin-sym">${c.symbol} · #${c.rank}</span><span style="font-size:18px">${favStar(c.symbol)}</span></div>
             <div style="display:flex;align-items:baseline;gap:12px;margin-top:2px"><span class="price">${money(c.price)}</span><span style="font-size:14px">${chg(c.change24h)}</span></div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">${signalBadge(c.signal)}${riskBadge(c.risk)}</div>
@@ -832,7 +856,7 @@
      ROUTER + EVENTOS
      ===================================================================== */
   const VIEWS = {
-    dashboard: renderDashboard, market: renderMarket, analysis: renderAnalysis,
+    dashboard: renderDashboard, market: renderMarket, watchlist: renderWatchlist, analysis: renderAnalysis,
     profile: () => renderProfile(state.coin), alerts: renderAlerts, news: renderNews,
     performance: renderPerformance, system: renderSystem, settings: renderSettings,
   };

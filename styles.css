@@ -491,6 +491,11 @@ table.market tbody tr:last-child td { border-bottom: 0; }
   width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; margin: -4px -4px 0 0; }
 .modal-close:hover { background: var(--surface-2); color: var(--text); }
 
+/* Estrella de Watchlist */
+.fav-star { cursor: pointer; color: var(--text-faint); font-size: 15px; line-height: 1; vertical-align: middle; transition: color .15s; }
+.fav-star:hover { color: var(--amber); }
+.fav-star.on { color: var(--amber); }
+
 /* =====================================================================
    RESPONSIVE
    ===================================================================== */
