@@ -32,11 +32,49 @@ window.NexusOpportunities = (function () {
     if (c.macd && c.macd.hist > 0) n++;
     return n;
   }
+  // Puntaje de atractivo 0–10 (capa de interpretación; combina campos del motor).
+  function rating(c) {
+    const rr = RISK_RANK[c.risk] != null ? RISK_RANK[c.risk] : 1;
+    const r = 5
+      + (c.score || 0) / 100 * 3                       // dirección/calidad: ±3
+      + ((c.confidence || 50) - 50) / 50 * 1           // confianza: ±1
+      + confirmations(c) / 4 * 1.5                     // confirmaciones técnicas: 0..1.5
+      - rr * 0.5                                       // riesgo: 0 / -0.5 / -1
+      + clamp((c.change7d || 0) / 100, -0.1, 0.1) * 5; // momentum: ±0.5
+    return Math.round(clamp(r, 0, 10) * 10) / 10;
+  }
+  // Nivel de seguridad RELATIVO al mercado (mejor distribución que umbrales absolutos).
   function level(c) {
-    const conf = c.confidence || 0, cf = confirmations(c);
-    if (c.score > 30 && conf >= 60 && c.risk !== "alto" && cf >= 3) return "segura";
-    if (c.score >= 0 && conf >= 45 && cf >= 2) return "moderada";
+    const r = rating(c);
+    if (r >= 6.5 && c.risk !== "alto") return "segura";
+    if (r >= 4.5) return "moderada";
     return "riesgosa";
+  }
+  // Recomendación de acción (4 niveles, siempre clara).
+  function action(c) {
+    const r = rating(c);
+    return r >= 7 ? "fuerte" : r >= 5.5 ? "moderada" : r >= 4 ? "especulativa" : "evitar";
+  }
+  // Convicción: fuerza del caso alcista (score + confianza + confirmaciones).
+  function conviction(c) {
+    const s = clamp((c.score || 0) / 100, 0, 1) * 0.45 + (c.confidence || 50) / 100 * 0.35 + confirmations(c) / 4 * 0.2;
+    return s >= 0.7 ? "Muy alta" : s >= 0.55 ? "Alta" : s >= 0.4 ? "Media" : "Baja";
+  }
+  // Horizonte sugerido según qué domina (estructura larga vs momentum corto).
+  function horizon(c) {
+    const longTrend = c.ema50 != null && c.ema200 != null && c.price > c.ema50 && c.ema50 > c.ema200;
+    const shortMom = Math.abs(c.change7d || 0) >= 6 || (c.rsi != null && (c.rsi < 35 || c.rsi > 65));
+    if (longTrend) return "Largo plazo";
+    if (shortMom) return "Corto plazo";
+    return "Swing";
+  }
+  // Potencial esperado (base) y riesgo (banda de volatilidad) por horizonte, en %.
+  function potential(c) {
+    const t = targets(c), pct = (v) => (v / c.price - 1) * 100;
+    return {
+      d7: { exp: pct(t.d7.base), risk: t.d7.sH * 100 },
+      d30: { exp: pct(t.d30.base), risk: t.d30.sH * 100 },
+    };
   }
   function probability(c) {
     return Math.round(clamp(50 + 0.30 * (c.score || 0) + 0.15 * ((c.confidence || 50) - 50), 5, 95));
@@ -76,5 +114,11 @@ window.NexusOpportunities = (function () {
       (b.score - a.score) || (b.confidence - a.confidence) || (RISK_RANK[a.risk] - RISK_RANK[b.risk]));
   }
 
-  return { level, probability, targets, recommendation, confirmations, rank, isFull: full };
+  // Ranking por atractivo 0–10 (desempate: confianza, luego menor riesgo).
+  function rankByRating(coins) {
+    return (coins || []).filter(full).sort((a, b) =>
+      (rating(b) - rating(a)) || (b.confidence - a.confidence) || (RISK_RANK[a.risk] - RISK_RANK[b.risk]));
+  }
+
+  return { level, rating, action, conviction, horizon, potential, probability, targets, recommendation, confirmations, rank, rankByRating, isFull: full };
 })();

@@ -446,7 +446,10 @@
   const OPP = window.NexusOpportunities;
   const OPP_BADGE = { segura: ["signal-buy", "🟢 Segura"], moderada: ["signal-neutral", "🟡 Moderada"], riesgosa: ["signal-sell", "🔴 Riesgosa"] };
   const oppBadge = (lv) => { const m = OPP_BADGE[lv] || OPP_BADGE.riesgosa; return `<span class="badge ${m[0]}">${m[1]}</span>`; };
+  const ACTION = { fuerte: ["signal-buy", "Compra fuerte"], moderada: ["signal-buy", "Compra moderada"], especulativa: ["signal-neutral", "Compra especulativa"], evitar: ["signal-sell", "Evitar"] };
+  const actionBadge = (a) => { const m = ACTION[a] || ACTION.evitar; return `<span class="badge ${m[0]}">${m[1]}</span>`; };
   const pctChg = (target, price) => { const d = (target / price - 1) * 100; return `<span class="${d >= 0 ? "pos" : "neg"}">${d >= 0 ? "+" : ""}${d.toFixed(1)}%</span>`; };
+  const sPct = (v) => `<span class="${v >= 0 ? "pos" : "neg"}">${v >= 0 ? "+" : ""}${v.toFixed(1)}%</span>`;
 
   function oppFactors(c) {
     if (!c.factors || !c.factors.length) return "";
@@ -465,18 +468,23 @@
     return `<table class="ftable"><thead><tr><th>Horizonte</th><th>Conservador</th><th>Base</th><th>Optimista</th></tr></thead><tbody>${row("7 días", t.d7)}${row("30 días", t.d30)}</tbody></table>`;
   }
   function oppCard(c, rankN) {
-    const lv = OPP.level(c), prob = OPP.probability(c);
+    const prob = OPP.probability(c), pot = OPP.potential(c);
     return `<div class="card opp-card" data-coin="${c.symbol}">
       <div class="opp-card-head">
         ${rankN ? `<span class="opp-rank">#${rankN}</span>` : ""}${coinCell(c)}
-        <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">${oppBadge(lv)}<button class="filter-btn" data-action="opp-audit" data-sym="${c.symbol}" style="padding:5px 10px">¿Por qué?</button></span>
+        <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center"><span class="opp-rating">${OPP.rating(c).toFixed(1)}/10</span>${actionBadge(OPP.action(c))}<button class="filter-btn" data-action="opp-audit" data-sym="${c.symbol}" style="padding:5px 10px">¿Por qué?</button></span>
       </div>
       <div class="analysis-metrics" style="margin:12px 0">
         <div class="metric"><div class="m-label">Precio</div><div class="m-val" style="font-size:15px">${money(c.price)}</div></div>
-        <div class="metric"><div class="m-label">Score</div><div class="m-val ${c.score >= 0 ? "pos" : "neg"}">${fmtScore(c.score)}</div></div>
-        <div class="metric"><div class="m-label">Confianza</div><div class="m-val">${c.confidence}%</div></div>
+        <div class="metric"><div class="m-label">Nivel</div><div class="m-val" style="font-size:13px">${oppBadge(OPP.level(c))}</div></div>
+        <div class="metric"><div class="m-label">Convicción</div><div class="m-val" style="font-size:14px">${OPP.conviction(c)}</div></div>
+        <div class="metric"><div class="m-label">Horizonte</div><div class="m-val" style="font-size:14px">${OPP.horizon(c)}</div></div>
         <div class="metric"><div class="m-label">Riesgo</div><div class="m-val" style="font-size:14px">${riskBadge(c.risk)}</div></div>
         <div class="metric"><div class="m-label">Prob. alcista</div><div class="m-val">${prob}%</div></div>
+      </div>
+      <div class="opp-pot">
+        <span>Potencial 7 d: <strong>${sPct(pot.d7.exp)}</strong> <span class="faint">riesgo ±${pot.d7.risk.toFixed(1)}%</span></span>
+        <span>Potencial 30 d: <strong>${sPct(pot.d30.exp)}</strong> <span class="faint">riesgo ±${pot.d30.risk.toFixed(1)}%</span></span>
       </div>
       <div class="section-sub">Objetivos de precio · 7 d y 30 d (volatilidad + momentum)</div>
       ${scenarioTable(c)}
@@ -486,20 +494,47 @@
     </div>`;
   }
   function renderOpportunities() {
-    const head = `<div class="page-head"><h1>Oportunidades</h1><p>Las mejores configuraciones detectadas por el motor, clasificadas por seguridad. Reutiliza el análisis existente — no cambia señales ni pesos.</p></div>`;
-    const disclaimer = `<div class="card" style="margin-bottom:16px;border-color:var(--amber)"><p class="muted" style="margin:0;font-size:12.5px;line-height:1.5">⚠ Estimación basada en datos históricos y análisis técnico. <strong>No constituye asesoramiento financiero.</strong> La "probabilidad alcista" y los objetivos de precio son estimaciones derivadas de volatilidad y momentum, no predicciones.</p></div>`;
-    const ranked = OPP ? OPP.rank(DATA.coins) : [];
+    const head = `<div class="page-head"><h1>Oportunidades</h1><p>Recomendador de inversión: ranking del mercado, mejores oportunidades del día y fichas auditables. Capa de interpretación sobre el motor — no cambia señales ni pesos.</p></div>`;
+    const disclaimer = `<div class="card" style="margin-bottom:16px;border-color:var(--amber)"><p class="muted" style="margin:0;font-size:12.5px;line-height:1.5">⚠ Estimación basada en datos históricos y análisis técnico. <strong>No constituye asesoramiento financiero.</strong> El puntaje de atractivo, la probabilidad y los objetivos son estimaciones derivadas de volatilidad y momentum, no predicciones.</p></div>`;
+    const ranked = OPP ? OPP.rankByRating(DATA.coins) : [];
     if (!ranked.length) return head + disclaimer + `<div class="card"><p class="muted" style="margin:0">No hay activos con análisis técnico suficiente en este momento.</p></div>`;
-    const legend = `<div class="card" style="margin-bottom:16px"><div class="section-head"><h2>Cómo se clasifica</h2></div>
-      <ul class="reasons" style="font-size:12.5px">
-        <li><span class="r-pip r-pos"></span><span><strong>🟢 Segura</strong> — Compra (score &gt; 30), confianza ≥ 60, riesgo ≠ alto y ≥ 3 confirmaciones (RSI 45–70, momentum+, EMA alcista, MACD+).</span></li>
-        <li><span class="r-pip r-neu"></span><span><strong>🟡 Moderada</strong> — sesgo positivo (score ≥ 0), confianza ≥ 45 y ≥ 2 confirmaciones.</span></li>
-        <li><span class="r-pip r-neg"></span><span><strong>🔴 Riesgosa</strong> — score negativo, riesgo alto, baja confianza o poca confirmación.</span></li>
-      </ul></div>`;
-    const top = ranked.slice(0, 5), rest = ranked.slice(5);
-    const topGrid = `<div class="section-head" style="margin-top:4px"><h2>Top 5 oportunidades</h2><span class="faint" style="font-size:12px">por score · confianza · riesgo</span></div><div class="grid cols-2">${top.map((c, i) => oppCard(c, i + 1)).join("")}</div>`;
-    const restGrid = rest.length ? `<div class="section-head" style="margin-top:26px"><h2>Resto de activos</h2></div><div class="grid cols-2">${rest.map((c) => oppCard(c, 0)).join("")}</div>` : "";
-    return head + disclaimer + legend + topGrid + restGrid;
+
+    const medals = ["🥇", "🥈", "🥉"];
+    const panel = `<div class="card briefing"><div class="briefing-head"><span class="briefing-kicker">NEXUS</span><h2>¿Qué compraría hoy?</h2></div>
+      <div class="grid cols-3">${ranked.slice(0, 3).map((c, i) => `<div class="qbuy" data-coin="${c.symbol}">
+        <div class="qbuy-top">${medals[i]} <strong>${c.symbol}</strong> <span class="opp-rating">${OPP.rating(c).toFixed(1)}/10</span></div>
+        <div style="margin:6px 0">${actionBadge(OPP.action(c))}</div>
+        <div class="faint" style="font-size:12px;line-height:1.45">${c.reasons && c.reasons[0] ? c.reasons[0].t : OPP.recommendation(c)}</div>
+      </div>`).join("")}</div></div>`;
+
+    const rankRows = ranked.map((c, i) => `<tr data-coin="${c.symbol}">
+      <td class="mono">#${i + 1}</td><td>${coinCell(c)}</td>
+      <td><div class="rating-bar"><span style="width:${OPP.rating(c) * 10}%"></span></div></td>
+      <td class="mono">${OPP.rating(c).toFixed(1)}</td><td>${actionBadge(OPP.action(c))}</td></tr>`).join("");
+    const rankingCard = `<div class="section-head" style="margin-top:26px"><h2>Ranking general del mercado</h2><span class="faint" style="font-size:12px">atractivo 0–10</span></div>
+      <div class="table-wrap"><table class="ftable" style="min-width:520px"><thead><tr><th>#</th><th>Activo</th><th>Atractivo</th><th>/10</th><th>Acción</th></tr></thead><tbody>${rankRows}</tbody></table></div>`;
+
+    const groups = { fuerte: [], moderada: [], especulativa: [], evitar: [] };
+    ranked.forEach((c) => groups[OPP.action(c)].push(c));
+    const chips = (arr) => arr.length ? arr.map((c) => `<span class="chip" data-coin="${c.symbol}" style="cursor:pointer">${c.symbol} ${OPP.rating(c).toFixed(1)}</span>`).join("") : `<span class="faint" style="font-size:12.5px">—</span>`;
+    const dia = `<div class="section-head" style="margin-top:26px"><h2>Mejores oportunidades del día</h2></div>
+      <div class="grid cols-4">
+        <div class="card"><div class="stat-label pos">Compra fuerte</div><div class="fav-grid" style="margin-top:8px">${chips(groups.fuerte)}</div></div>
+        <div class="card"><div class="stat-label pos">Compra moderada</div><div class="fav-grid" style="margin-top:8px">${chips(groups.moderada)}</div></div>
+        <div class="card"><div class="stat-label" style="color:var(--amber)">Compra especulativa</div><div class="fav-grid" style="margin-top:8px">${chips(groups.especulativa)}</div></div>
+        <div class="card"><div class="stat-label neg">Evitar</div><div class="fav-grid" style="margin-top:8px">${chips(groups.evitar)}</div></div>
+      </div>`;
+
+    const legend = `<div class="card" style="margin-top:16px"><div class="section-head"><h2>Cómo se calcula</h2></div>
+      <p class="muted" style="font-size:12.5px;line-height:1.6;margin:0">
+        <strong>Atractivo 0–10</strong> = 5 + score/100·3 + (confianza−50)/50·1 + confirmaciones/4·1.5 − riesgo·0.5 + momentum.
+        <strong>Acción:</strong> Compra fuerte ≥7 · moderada ≥5.5 · especulativa ≥4 · Evitar &lt;4.
+        <strong>Nivel:</strong> 🟢 Segura ≥6.5 (riesgo ≠ alto) · 🟡 Moderada ≥4.5 · 🔴 Riesgosa &lt;4.5.
+        <strong>Convicción</strong> = fuerza del caso (score+confianza+confirmaciones). <strong>Horizonte</strong> según estructura larga (EMA) vs momentum corto. Objetivos por volatilidad histórica.
+      </p></div>`;
+
+    const cards = `<div class="section-head" style="margin-top:26px"><h2>Fichas detalladas</h2></div><div class="grid cols-2">${ranked.map((c, i) => oppCard(c, i + 1)).join("")}</div>`;
+    return head + disclaimer + panel + rankingCard + dia + legend + cards;
   }
 
   function coinAuditModalHTML(c) {
